@@ -1,0 +1,446 @@
+/**
+ * Messaging (MSG-*): channels, templates, delivery to a client, manual messages, desk notifications.
+ * Channels are tried in the tenant's order (tenants.message_channels); the first that delivers wins.
+ * - telegram: the platform bot, for clients who linked their chat (TELEGRAM_BOT_TOKEN)
+ * - sms: SMS.ru when SMS_RU_API_KEY is set; other gateways plug in with registerChannel
+ * - log: records the message without sending, so nothing is lost while channels are not connected
+ */
+import { createHash, randomBytes } from "node:crypto";
+import { AppError } from "@/domain/errors";
+import { formatMoney } from "@/domain/money";
+import { isAdminPlus } from "./access";
+import { audit } from "./audit";
+import { many, one } from "./db";
+import type { BranchRow, Ctx } from "./types";
+
+export type Button = { text: string; data?: string; url?: string };
+export type OutgoingMessage = { recipient: string; body: string; buttons?: Button[] };
+export type Delivery = { ok: true } | { ok: false; error: string };
+export type Channel = {
+  name: string;
+  /** What the channel sends to: a phone number (default) or a linked Telegram chat. */
+  address?: "phone" | "telegram";
+  deliver: (message: OutgoingMessage) => Promise<Delivery>;
+};
+
+const CHANNELS = new Map<string, Channel>();
+export function registerChannel(channel: Channel) {
+  CHANNELS.set(channel.name, channel);
+}
+export function channel(name: string) {
+  return CHANNELS.get(name) ?? null;
+}
+registerChannel({ name: "log", deliver: async () => ({ ok: true }) });
+
+// ---------------------------------------------------------------- Telegram
+
+type TelegramTransport = (method: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; description?: string; result?: unknown }>;
+let telegramTransport: TelegramTransport | null = null;
+
+/** Real Bot API, or a fake in tests. */
+export function setTelegramTransport(transport: TelegramTransport | null) {
+  telegramTransport = transport;
+}
+function telegram(): TelegramTransport | null {
+  if (telegramTransport) return telegramTransport;
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  return async (method, payload) => {
+    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return (await response.json()) as { ok: boolean; description?: string };
+  };
+}
+export function publicUrl() {
+  return (process.env.PUBLIC_URL || "http://127.0.0.1:43123").replace(/\/$/, "");
+}
+
+export function telegramBotName() {
+  return process.env.TELEGRAM_BOT_USERNAME || (telegramTransport ? "test_bot" : "");
+}
+export function telegramConfigured() {
+  return Boolean(telegram() && telegramBotName());
+}
+
+export async function telegramSend(chatId: string, body: string, buttons?: Button[]): Promise<Delivery> {
+  const api = telegram();
+  if (!api) return { ok: false, error: "Telegram-бот не настроен" };
+  const reply_markup = buttons?.length
+    ? { inline_keyboard: [buttons.map((button) => (button.url ? { text: button.text, url: button.url } : { text: button.text, callback_data: button.data }))] }
+    : undefined;
+  try {
+    const result = await api("sendMessage", { chat_id: chatId, text: body, ...(reply_markup ? { reply_markup } : {}) });
+    return result.ok ? { ok: true } : { ok: false, error: result.description ?? "Telegram отклонил сообщение" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+registerChannel({ name: "telegram", address: "telegram", deliver: (message) => telegramSend(message.recipient, message.body, message.buttons) });
+
+// ---------------------------------------------------------------- SMS
+
+if (process.env.SMS_RU_API_KEY) {
+  registerChannel({
+    name: "sms",
+    async deliver(message) {
+      const url = new URL("https://sms.ru/sms/send");
+      url.searchParams.set("api_id", String(process.env.SMS_RU_API_KEY));
+      url.searchParams.set("to", message.recipient.replace(/^\+/, ""));
+      url.searchParams.set("msg", message.body);
+      url.searchParams.set("json", "1");
+      if (process.env.SMS_SENDER) url.searchParams.set("from", process.env.SMS_SENDER);
+      try {
+        const response = await fetch(url);
+        const data = (await response.json()) as { status?: string; status_text?: string; sms?: Record<string, { status: string; status_text?: string }> };
+        const sms = data.sms ? Object.values(data.sms)[0] : null;
+        if (data.status === "OK" && (!sms || sms.status === "OK")) return { ok: true };
+        return { ok: false, error: sms?.status_text ?? data.status_text ?? "SMS не отправлено" };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  });
+}
+
+/** For the settings screen: which channels exist on this server. */
+export function channelCatalog() {
+  return [
+    { name: "telegram", label: "Telegram-бот", available: telegramConfigured(), hint: telegramConfigured() ? `@${telegramBotName()}` : "Задайте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME" },
+    { name: "sms", label: "SMS", available: CHANNELS.has("sms"), hint: CHANNELS.has("sms") ? "SMS.ru" : "Задайте SMS_RU_API_KEY" },
+    { name: "log", label: "Только журнал", available: true, hint: "Сообщение записывается, но не уходит клиенту" },
+  ];
+}
+
+// ---------------------------------------------------------------- Templates
+
+export type TemplateKey = "reminder" | "booking_created" | "booking_cancelled" | "pay_link";
+export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
+  reminder: "Напоминаем о записи в {салон}{адрес}: {когда}. {услуги}, мастер {мастер}. Подтвердите или отмените визит: {ссылка}",
+  booking_created: "Вы записаны в {салон}: {когда}, {услуги}, мастер {мастер}. Управлять записью: {ссылка}",
+  booking_cancelled: "Запись в {салон} на {когда} отменена. Будем рады видеть вас снова!",
+  pay_link: "{салон}: ссылка на оплату {сумма} — {ссылка}",
+};
+export const TEMPLATE_LABEL: Record<TemplateKey, string> = {
+  reminder: "Напоминание о визите",
+  booking_created: "Запись создана",
+  booking_cancelled: "Запись отменена",
+  pay_link: "Ссылка на оплату",
+};
+export const PLACEHOLDERS = ["{имя}", "{салон}", "{адрес}", "{когда}", "{услуги}", "{мастер}", "{сумма}", "{ссылка}"];
+
+export function render(template: string, values: Record<string, string>) {
+  return template
+    .replace(/\{([а-яё]+)\}/gi, (match, key: string) => (key.toLowerCase() in values ? values[key.toLowerCase()] : match))
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export async function templateBody(ctx: Ctx, key: TemplateKey) {
+  const row = await one<{ body: string }>(ctx.db, "SELECT body FROM message_templates WHERE tenant_id = $1 AND key = $2", [ctx.actor.tenantId, key]);
+  return row?.body ?? DEFAULT_TEMPLATES[key];
+}
+
+export async function listTemplates(ctx: Ctx) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  const rows = await many<{ key: TemplateKey; body: string }>(ctx.db, "SELECT key, body FROM message_templates WHERE tenant_id = $1", [ctx.actor.tenantId]);
+  return (Object.keys(DEFAULT_TEMPLATES) as TemplateKey[]).map((key) => {
+    const custom = rows.find((row) => row.key === key);
+    return { key, label: TEMPLATE_LABEL[key], body: custom?.body ?? DEFAULT_TEMPLATES[key], custom: Boolean(custom), defaultBody: DEFAULT_TEMPLATES[key] };
+  });
+}
+
+export async function saveTemplate(ctx: Ctx, key: string, body: string | null) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  if (!(key in DEFAULT_TEMPLATES)) throw new AppError("VALIDATION", "Неизвестный шаблон");
+  if (body === null || body.trim() === "" || body.trim() === DEFAULT_TEMPLATES[key as TemplateKey]) {
+    await ctx.db.query("DELETE FROM message_templates WHERE tenant_id = $1 AND key = $2", [ctx.actor.tenantId, key]);
+  } else {
+    const text = body.trim();
+    if (text.length > 1000) throw new AppError("VALIDATION", "Шаблон длиннее 1000 символов");
+    const unknown = (text.match(/\{[^}]*\}/g) ?? []).filter((token) => !PLACEHOLDERS.includes(token.toLowerCase()));
+    if (unknown.length) throw new AppError("VALIDATION", `Неизвестная подстановка: ${unknown.join(", ")}`);
+    await ctx.db.query(
+      `INSERT INTO message_templates (tenant_id, key, body, updated_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id, key) DO UPDATE SET body = EXCLUDED.body, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [ctx.actor.tenantId, key, text, ctx.actor.userId],
+    );
+  }
+  return (await listTemplates(ctx)).find((row) => row.key === key)!;
+}
+
+/** Values for an appointment's template. */
+export async function appointmentValues(ctx: Ctx, appointmentId: string, extra: Record<string, string> = {}) {
+  const row = await one<{
+    starts_at: Date;
+    staff_name: string;
+    client_name: string | null;
+    title: string | null;
+    price_minor: number;
+    branch_id: string;
+  }>(
+    ctx.db,
+    `SELECT a.starts_at, a.branch_id, s.display_name AS staff_name, c.name AS client_name,
+            (SELECT string_agg(title_snapshot, ', ' ORDER BY position) FROM appointment_services WHERE appointment_id = a.id) AS title,
+            (SELECT COALESCE(SUM(price_minor), 0)::int FROM appointment_services WHERE appointment_id = a.id) AS price_minor
+     FROM appointments a JOIN staff s ON s.id = a.staff_id LEFT JOIN clients c ON c.id = a.client_id WHERE a.id = $1`,
+    [appointmentId],
+  );
+  if (!row) throw new AppError("NOT_FOUND", "Запись не найдена");
+  const branch = await one<BranchRow>(ctx.db, "SELECT * FROM branches WHERE id = $1", [row.branch_id]);
+  const when = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: branch!.timezone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(row.starts_at));
+  return {
+    branch: branch!,
+    values: {
+      имя: row.client_name ?? "",
+      салон: branch!.name,
+      адрес: branch!.address ? `, ${branch!.address}` : "",
+      когда: when,
+      услуги: row.title ?? "Визит",
+      мастер: row.staff_name,
+      сумма: formatMoney(Number(row.price_minor), branch!.currency),
+      ссылка: "",
+      ...extra,
+    },
+  };
+}
+
+// ---------------------------------------------------------------- Delivery
+
+export type SendResult = { id: string; status: "delivered" | "failed"; channel: string; error: string | null };
+
+async function clientAddress(ctx: Ctx, clientId: string) {
+  const row = await one<{ phone: string | null; chat_id: string | null }>(
+    ctx.db,
+    `SELECT (SELECT phone_e164 FROM client_phones p WHERE p.client_id = c.id AND p.deleted_at IS NULL ORDER BY p.is_primary DESC LIMIT 1) AS phone,
+            (SELECT chat_id FROM telegram_links t WHERE t.client_id = c.id LIMIT 1) AS chat_id
+     FROM clients c WHERE c.id = $1 AND c.deleted_at IS NULL`,
+    [clientId],
+  );
+  return row;
+}
+
+/**
+ * MSG-SEND-01: one message to one client through the first channel that can reach them.
+ * Everything is logged in outbound_messages, sent or not.
+ */
+export async function deliverToClient(
+  ctx: Ctx,
+  input: {
+    clientId: string;
+    branchId: string | null;
+    appointmentId?: string | null;
+    kind: "reminder" | "manual" | "booking_created" | "booking_cancelled" | "pay_link";
+    body: string;
+    buttons?: Button[];
+    /** Unique kinds (reminder) skip silently when already logged. */
+    once?: boolean;
+  },
+): Promise<SendResult | null> {
+  const channelsRow = await one<{ message_channels: string[] }>(ctx.db, "SELECT message_channels FROM tenants WHERE id = $1", [ctx.actor.tenantId]);
+  const names = channelsRow?.message_channels?.length ? channelsRow.message_channels : ["log"];
+  const address = await clientAddress(ctx, input.clientId);
+  let outcome: { channel: string; recipient: string; error: string | null } = {
+    channel: names[0] ?? "none",
+    recipient: address?.phone ?? "",
+    error: "Нет канала, через который можно связаться с клиентом",
+  };
+  for (const name of names) {
+    const target = CHANNELS.get(name);
+    if (!target) continue;
+    const recipient = target.address === "telegram" ? address?.chat_id : address?.phone;
+    if (!recipient) {
+      if (outcome.error?.startsWith("Нет канала")) outcome = { channel: name, recipient: address?.phone ?? "", error: target.address === "telegram" ? "Клиент не подключил Telegram" : "У клиента нет телефона" };
+      continue;
+    }
+    // A Telegram chat shows buttons; elsewhere links stay in the text.
+    const result = await target.deliver({ recipient, body: input.body, buttons: target.address === "telegram" ? input.buttons : undefined });
+    if (result.ok) {
+      outcome = { channel: name, recipient, error: null };
+      break;
+    }
+    outcome = { channel: name, recipient, error: result.error };
+  }
+  const id = crypto.randomUUID();
+  const inserted = await ctx.db.query(
+    `INSERT INTO outbound_messages (id, tenant_id, branch_id, appointment_id, client_id, kind, channel, recipient, body, status, error, created_at, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     ${input.once ? "ON CONFLICT DO NOTHING" : ""}`,
+    [
+      id,
+      ctx.actor.tenantId,
+      input.branchId,
+      input.appointmentId ?? null,
+      input.clientId,
+      input.kind,
+      outcome.channel,
+      outcome.recipient,
+      input.body,
+      outcome.error ? "failed" : "delivered",
+      outcome.error,
+      ctx.now.toISOString(),
+      ctx.actor.userId,
+    ],
+  );
+  if (input.once && inserted.rowCount === 0) return null;
+  return { id, status: outcome.error ? "failed" : "delivered", channel: outcome.channel, error: outcome.error };
+}
+
+/** MSG-MANUAL-01: the desk writes to a client (free text or a template). */
+export async function sendManual(ctx: Ctx, clientId: string, input: { body: string; appointmentId?: string | null; branchId?: string | null }) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  const body = (input.body ?? "").trim();
+  if (!body) throw new AppError("VALIDATION", "Напишите текст сообщения");
+  if (body.length > 1000) throw new AppError("VALIDATION", "Сообщение длиннее 1000 символов");
+  const client = await one<{ id: string }>(ctx.db, "SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL", [clientId]);
+  if (!client) throw new AppError("NOT_FOUND", "Клиент не найден");
+  const branchId = input.branchId ?? ctx.actor.branchId ?? null;
+  const result = await deliverToClient(ctx, { clientId, branchId, appointmentId: input.appointmentId ?? null, kind: "manual", body });
+  await audit(ctx, { branchId, entity: "client", entityId: clientId, action: "message.sent", diff: { channel: result?.channel, status: result?.status } });
+  return result!;
+}
+
+export async function clientMessages(ctx: Ctx, clientId: string) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  const rows = await many<{ id: string; kind: string; channel: string; body: string; status: string; error: string | null; created_at: Date }>(
+    ctx.db,
+    "SELECT id, kind, channel, body, status, error, created_at FROM outbound_messages WHERE client_id = $1 ORDER BY created_at DESC LIMIT 50",
+    [clientId],
+  );
+  const link = await one<{ username: string | null; linked_at: Date }>(ctx.db, "SELECT username, linked_at FROM telegram_links WHERE client_id = $1", [clientId]);
+  return {
+    telegram: link ? { username: link.username, linkedAt: new Date(link.linked_at).toISOString() } : null,
+    messages: rows.map((row) => ({ id: row.id, kind: row.kind, channel: row.channel, body: row.body, status: row.status, error: row.error, createdAt: new Date(row.created_at).toISOString() })),
+  };
+}
+
+// ---------------------------------------------------------------- Telegram linking
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** MSG-TG-LINK-01: a deep link the client (or a staff member) opens to connect the bot. Valid 7 days. */
+export async function telegramLink(ctx: Ctx, target: { clientId?: string; self?: boolean }) {
+  if (!telegramConfigured()) throw new AppError("VALIDATION", "Telegram-бот не настроен на сервере");
+  if (target.clientId && !isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  if (target.self && !isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") throw new AppError("FORBIDDEN", "Недостаточно прав");
+  return issueTelegramLink(ctx, target);
+}
+
+/** No permission check: the online booking offers the link to the client who just booked. */
+export async function issueTelegramLink(ctx: Ctx, target: { clientId?: string; self?: boolean }) {
+  const token = randomBytes(16).toString("hex");
+  await ctx.db.query(
+    `INSERT INTO telegram_link_tokens (token_hash, tenant_id, client_id, user_id, expires_at)
+     VALUES ($1,$2,$3,$4,$5::timestamptz + interval '7 days')`,
+    [sha256(token), ctx.actor.tenantId, target.clientId ?? null, target.self ? ctx.actor.userId : null, ctx.now.toISOString()],
+  );
+  return { url: `https://t.me/${telegramBotName()}?start=${token}` };
+}
+
+/** /start <token> from the bot: binds the chat. Returns the greeting. */
+export async function bindTelegram(ctx: Ctx, token: string, chat: { chatId: string; username?: string | null }) {
+  const row = await one<{ token_hash: string; client_id: string | null; user_id: string | null; expires_at: Date; used_at: Date | null }>(
+    ctx.db,
+    "SELECT * FROM telegram_link_tokens WHERE token_hash = $1 FOR UPDATE",
+    [sha256(token)],
+  );
+  if (!row || row.used_at || new Date(row.expires_at) <= ctx.now) return "Ссылка устарела. Попросите салон прислать новую.";
+  await ctx.db.query("UPDATE telegram_link_tokens SET used_at = $2 WHERE token_hash = $1", [row.token_hash, ctx.now.toISOString()]);
+  if (row.client_id) {
+    await ctx.db.query("DELETE FROM telegram_links WHERE client_id = $1", [row.client_id]);
+  } else {
+    await ctx.db.query("DELETE FROM telegram_links WHERE user_id = $1", [row.user_id]);
+  }
+  await ctx.db.query("INSERT INTO telegram_links (id, tenant_id, client_id, user_id, chat_id, username) VALUES ($1,$2,$3,$4,$5,$6)", [
+    crypto.randomUUID(),
+    ctx.actor.tenantId,
+    row.client_id,
+    row.user_id,
+    chat.chatId,
+    chat.username ?? null,
+  ]);
+  const salon = await one<{ name: string }>(ctx.db, "SELECT name FROM tenants WHERE id = $1", [ctx.actor.tenantId]);
+  return row.client_id
+    ? `Готово! Теперь ${salon?.name ?? "салон"} будет присылать сюда напоминания о записях. Отключиться можно командой /stop.`
+    : `Готово! Сюда будут приходить уведомления ${salon?.name ?? "салона"}: новые записи, отмены и оплаты.`;
+}
+
+export async function unbindTelegram(ctx: Ctx, chatId: string) {
+  await ctx.db.query("DELETE FROM telegram_links WHERE chat_id = $1", [chatId]);
+}
+
+// ---------------------------------------------------------------- Desk notifications
+
+/** MSG-DESK-01: something the admins must see. In-app, plus Telegram for staff who linked the bot. */
+export async function notifyDesk(
+  ctx: Ctx,
+  input: { branchId: string | null; kind: string; title: string; body?: string; entity?: string; entityId?: string | null },
+) {
+  const id = crypto.randomUUID();
+  await ctx.db.query(
+    `INSERT INTO notifications (id, tenant_id, branch_id, kind, title, body, entity, entity_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, ctx.actor.tenantId, input.branchId, input.kind, input.title, input.body ?? "", input.entity ?? null, input.entityId ?? null, ctx.now.toISOString()],
+  );
+  if (telegram()) {
+    const staff = await many<{ chat_id: string }>(
+      ctx.db,
+      `SELECT DISTINCT l.chat_id FROM telegram_links l
+       JOIN memberships m ON m.user_id = l.user_id AND m.tenant_id = l.tenant_id
+       WHERE l.user_id IS NOT NULL AND m.role IN ('owner', 'admin') AND (m.branch_id IS NULL OR $1::uuid IS NULL OR m.branch_id = $1)`,
+      [input.branchId],
+    );
+    for (const row of staff) await telegramSend(row.chat_id, input.body ? `${input.title}\n${input.body}` : input.title);
+  }
+  return id;
+}
+
+export async function listNotifications(ctx: Ctx, input: { unreadOnly?: boolean } = {}) {
+  if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") return { unread: 0, items: [] };
+  const where = "AND ($1::uuid IS NULL OR branch_id IS NULL OR branch_id = $1)";
+  const items = await many<{ id: string; kind: string; title: string; body: string; entity: string | null; entity_id: string | null; read_at: Date | null; created_at: Date }>(
+    ctx.db,
+    `SELECT id, kind, title, body, entity, entity_id, read_at, created_at FROM notifications
+     WHERE TRUE ${where} ${input.unreadOnly ? "AND read_at IS NULL" : ""} ORDER BY created_at DESC LIMIT 30`,
+    [ctx.actor.branchId],
+  );
+  const unread = await one<{ n: number }>(ctx.db, `SELECT COUNT(*)::int AS n FROM notifications WHERE read_at IS NULL ${where}`, [ctx.actor.branchId]);
+  return {
+    unread: Number(unread?.n ?? 0),
+    items: items.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      body: row.body,
+      entity: row.entity,
+      entityId: row.entity_id,
+      read: Boolean(row.read_at),
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+  };
+}
+
+export async function markNotificationsRead(ctx: Ctx, ids?: string[]) {
+  if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") throw new AppError("FORBIDDEN", "Недостаточно прав");
+  if (ids?.length) {
+    await ctx.db.query("UPDATE notifications SET read_at = $2, read_by = $3 WHERE id = ANY($1::uuid[]) AND read_at IS NULL", [ids, ctx.now.toISOString(), ctx.actor.userId]);
+  } else {
+    await ctx.db.query(
+      `UPDATE notifications SET read_at = $1, read_by = $2 WHERE read_at IS NULL ${ctx.actor.branchId ? "AND (branch_id IS NULL OR branch_id = $3)" : ""}`,
+      ctx.actor.branchId ? [ctx.now.toISOString(), ctx.actor.userId, ctx.actor.branchId] : [ctx.now.toISOString(), ctx.actor.userId],
+    );
+  }
+  return listNotifications(ctx);
+}

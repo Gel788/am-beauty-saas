@@ -16,6 +16,7 @@ import { many, one, poolOne, withSession } from "./db";
 import { loadWorkingIntervals } from "./hours";
 import type { Actor, BranchRow, Ctx } from "./types";
 import { applyPromo } from "./loyalty";
+import { appointmentValues, deliverToClient, issueTelegramLink, notifyDesk, publicUrl, render, telegramConfigured, templateBody } from "./messaging";
 
 /** The online channel acts under this fixed id: it has no user row, like the system actor in audit. */
 export const ONLINE_ACTOR_ID = "00000000-0000-0000-0000-0000000000b0";
@@ -376,7 +377,18 @@ async function findOrCreateClient(ctx: Ctx, name: string, phone: string) {
 export async function confirmBooking(
   ctx: Ctx,
   branchId: string,
-  input: { holdId: string; name: string; phone: string; comment?: string; idempotencyKey?: string; promoCode?: string },
+  input: {
+    holdId: string;
+    name: string;
+    phone: string;
+    comment?: string;
+    idempotencyKey?: string;
+    promoCode?: string;
+    /** 152-ФЗ: consent to process personal data, required. */
+    consent?: boolean;
+    /** 38-ФЗ: separate, optional consent to promotions. */
+    marketing?: boolean;
+  },
 ) {
   const branch = await loadOnlineBranch(ctx, branchId);
   const hold = await one<HoldRow>(ctx.db, "SELECT * FROM slot_holds WHERE id = $1 AND branch_id = $2 FOR UPDATE", [
@@ -395,6 +407,7 @@ export async function confirmBooking(
   const name = input.name?.trim() ?? "";
   if (name.length < 1 || name.length > 120) throw new AppError("VALIDATION", "Укажите имя");
   const phone = normalizePhone(input.phone ?? "");
+  if (input.consent !== true) throw new AppError("VALIDATION", "Нужно согласие на обработку персональных данных");
   const comment = (input.comment ?? "").trim().slice(0, 500);
 
   const staff = await one<{ active: boolean; online_bookable: boolean; display_name: string }>(
@@ -408,6 +421,12 @@ export async function confirmBooking(
   const service = await loadOnlineService(ctx, hold.service_id);
 
   const client = await findOrCreateClient(ctx, name, phone);
+  await ctx.db.query(
+    `UPDATE clients SET consent_pd_at = COALESCE(consent_pd_at, $2), consent_pd_source = COALESCE(consent_pd_source, 'online'),
+       consent_marketing = consent_marketing OR $3, consent_marketing_at = CASE WHEN $3 AND NOT consent_marketing THEN $2 ELSE consent_marketing_at END
+     WHERE id = $1`,
+    [client.id, ctx.now.toISOString(), input.marketing === true],
+  );
   const active = await one<{ n: number }>(
     ctx.db,
     `SELECT COUNT(*)::int AS n FROM appointments
@@ -458,6 +477,7 @@ export async function confirmBooking(
     promo: promo ? { code: promo.code, discountMinor: promo.discountMinor } : null,
     clientName: name,
     cancelToken: token,
+    telegramUrl: telegramConfigured() ? (await issueTelegramLink(ctx, { clientId: client.id })).url : null,
     cancelUntil: cancelUntil.toISOString(),
     branch: presentBranch(branch),
   };
@@ -472,6 +492,19 @@ export async function confirmBooking(
     action: "appointment.online_booked",
     diff: { holdId: hold.id, clientId: client.id, newClient: client.created },
   });
+  const when = new Intl.DateTimeFormat("ru-RU", { timeZone: branch.timezone, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(appointment.startsAt));
+  await notifyDesk(ctx, {
+    branchId,
+    kind: "booking.online",
+    title: `Онлайн-запись: ${name}`,
+    body: `${when} · ${service.title} · ${staff.display_name}`,
+    entity: "appointment",
+    entityId: appointment.id,
+  });
+  if (branch.booking_message_enabled) {
+    const { values } = await appointmentValues(ctx, appointment.id, { ссылка: `${publicUrl()}/booking/${token}` });
+    await deliverToClient(ctx, { clientId: client.id, branchId, appointmentId: appointment.id, kind: "booking_created", body: render(await templateBody(ctx, "booking_created"), values) });
+  }
   return result;
 }
 
@@ -522,6 +555,7 @@ function presentBooking(booking: Awaited<ReturnType<typeof loadBooking>>) {
     priceMinor: Number(row.price_minor),
     cancelUntil: booking.cancelUntil.toISOString(),
     canCancel: booking.canCancel,
+    canConfirm: row.status === "scheduled" && new Date(row.starts_at).getTime() > Date.now() - 3_600_000,
     branch: presentBranch(branch),
   };
 }
@@ -546,6 +580,14 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
       action: "appointment.cancel_requested",
       diff: { reason: reason || null, via: "online" },
     });
+    await notifyDesk(ctx, {
+      branchId: booking.row.branch_id,
+      kind: "booking.cancel_requested",
+      title: `Просит отменить: ${booking.row.client_name ?? "клиент"}`,
+      body: `Поздно для онлайн-отмены. ${reason ? `Причина: ${reason}` : "Позвоните клиенту."}`,
+      entity: "appointment",
+      entityId: appointmentId,
+    });
     return { ...presentBooking(booking), outcome: "requested" as const };
   }
   await ctx.db.query(
@@ -561,5 +603,35 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
     action: "appointment.cancelled",
     diff: { reason: reason || null, from: booking.row.status, via: "online" },
   });
+  await notifyDesk(ctx, {
+    branchId: booking.row.branch_id,
+    kind: "booking.cancelled",
+    title: `Клиент отменил запись: ${booking.row.client_name ?? "клиент"}`,
+    body: reason ? `Причина: ${reason}` : "",
+    entity: "appointment",
+    entityId: appointmentId,
+  });
   return { ...presentBooking(await loadBooking(ctx, appointmentId)), outcome: "cancelled" as const };
+}
+
+/** MSG-CONFIRM-01: the client confirms from the reminder (link or Telegram button). */
+export async function confirmVisit(ctx: Ctx, appointmentId: string, via: "link" | "telegram") {
+  const booking = await loadBooking(ctx, appointmentId);
+  if (booking.row.status === "confirmed") return { ...presentBooking(booking), outcome: "already_confirmed" as const };
+  if (booking.row.status !== "scheduled") throw new AppError("VALIDATION", "Эту запись уже нельзя подтвердить");
+  await ctx.db.query(
+    "UPDATE appointments SET status = 'confirmed', confirmed_via = $2, version = version + 1, updated_by = $3, updated_at = now() WHERE id = $1",
+    [appointmentId, via, ctx.actor.userId],
+  );
+  await audit(ctx, { branchId: booking.row.branch_id, entity: "appointment", entityId: appointmentId, action: "appointment.confirmed", diff: { via } });
+  const when = new Intl.DateTimeFormat("ru-RU", { timeZone: booking.branch.timezone, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(booking.row.starts_at));
+  await notifyDesk(ctx, {
+    branchId: booking.row.branch_id,
+    kind: "booking.confirmed",
+    title: `Подтвердил визит: ${booking.row.client_name ?? "клиент"}`,
+    body: `${when} · ${booking.row.title ?? ""} · ${booking.row.staff_name}`,
+    entity: "appointment",
+    entityId: appointmentId,
+  });
+  return { ...presentBooking(await loadBooking(ctx, appointmentId)), outcome: "confirmed" as const };
 }

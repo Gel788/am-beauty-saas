@@ -1,31 +1,16 @@
 import { AppError } from "@/domain/errors";
-import { formatMoney } from "@/domain/money";
 import { localMinutes } from "@/domain/time";
 import { isAdminPlus, loadBranch } from "./access";
 import { audit } from "./audit";
-import { many, one, pool, withSession } from "./db";
+import { many, pool, withSession } from "./db";
+import { createHash, randomBytes } from "node:crypto";
+import { appointmentValues, deliverToClient, publicUrl, render, templateBody } from "./messaging";
 import type { Actor, BranchRow, Ctx } from "./types";
 
 /** The reminder job acts under this fixed id, like the online channel. */
 export const JOBS_ACTOR_ID = "00000000-0000-0000-0000-0000000000a1";
 
-export type OutgoingMessage = { recipient: string; body: string };
-export type Delivery = { ok: true } | { ok: false; error: string };
-
-/**
- * A delivery channel. MSG-AUTO-01 order is Telegram → WhatsApp → SMS → push; each tenant lists
- * the ones it has connected in tenants.message_channels and the first that delivers wins.
- */
-export type Channel = { name: string; deliver: (message: OutgoingMessage) => Promise<Delivery> };
-
-/** Records the message instead of sending it, until a real channel is connected. */
-const logChannel: Channel = { name: "log", deliver: async () => ({ ok: true }) };
-
-const CHANNELS = new Map<string, Channel>([[logChannel.name, logChannel]]);
-
-export function registerChannel(channel: Channel) {
-  CHANNELS.set(channel.name, channel);
-}
+export { registerChannel, type Channel, type Delivery, type OutgoingMessage } from "./messaging";
 
 function jobsActor(tenantId: string): Actor {
   return { userId: JOBS_ACTOR_ID, tenantId, role: "client", branchId: null, staffId: null, name: "Напоминания", email: "" };
@@ -40,25 +25,16 @@ export function inQuietHours(now: Date, branch: Pick<BranchRow, "timezone" | "qu
   return start < end ? minute >= start && minute < end : minute >= start || minute < end;
 }
 
-function reminderText(row: { starts_at: Date; title: string | null; staff_name: string; price_minor: number }, branch: BranchRow) {
-  const when = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: branch.timezone,
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(row.starts_at));
-  const address = branch.address ? `, ${branch.address}` : "";
-  return `Напоминаем о записи в ${branch.name}${address}: ${when}. ${row.title ?? "Визит"}, мастер ${row.staff_name}, ${formatMoney(Number(row.price_minor), branch.currency)}. Если планы изменились, предупредите нас, пожалуйста.`;
+/** A manage link of its own, so the online-booking link keeps working. */
+export async function manageLink(ctx: Ctx, appointmentId: string) {
+  const token = randomBytes(32).toString("hex");
+  await ctx.db.query("UPDATE appointments SET reminder_token_hash = $2 WHERE id = $1", [appointmentId, createHash("sha256").update(token).digest("hex")]);
+  return `${publicUrl()}/booking/${token}`;
 }
 
 /** MSG-AUTO-01 for one tenant: every live appointment inside the reminder window, once. */
 export async function sendDueReminders(ctx: Ctx) {
-  const channelsRow = await one<{ message_channels: string[] }>(ctx.db, "SELECT message_channels FROM tenants WHERE id = $1", [
-    ctx.actor.tenantId,
-  ]);
-  const channels = (channelsRow?.message_channels ?? ["log"]).map((name) => CHANNELS.get(name)).filter(Boolean) as Channel[];
+  const template = await templateBody(ctx, "reminder");
   const branches = await many<BranchRow>(ctx.db, "SELECT * FROM branches WHERE reminder_enabled ORDER BY created_at");
   const result = { sent: 0, failed: 0, deferred: 0 };
   for (const branch of branches) {
@@ -92,37 +68,22 @@ export async function sendDueReminders(ctx: Ctx) {
       continue;
     }
     for (const row of due) {
-      const body = reminderText(row, branch);
-      let delivered: { channel: string; error: string | null } = { channel: channels[0]?.name ?? "none", error: "Нет подключённого канала" };
-      if (!row.phone) delivered = { channel: delivered.channel, error: "У клиента нет телефона" };
-      else {
-        for (const channel of channels) {
-          const outcome = await channel.deliver({ recipient: row.phone, body });
-          if (outcome.ok) {
-            delivered = { channel: channel.name, error: null };
-            break;
-          }
-          delivered = { channel: channel.name, error: outcome.error };
-        }
-      }
-      await ctx.db.query(
-        `INSERT INTO outbound_messages (id, tenant_id, branch_id, appointment_id, client_id, kind, channel, recipient, body, status, error, created_at)
-         VALUES ($1,$2,$3,$4,$5,'reminder',$6,$7,$8,$9,$10,$11)
-         ON CONFLICT DO NOTHING`,
-        [
-          crypto.randomUUID(),
-          ctx.actor.tenantId,
-          branch.id,
-          row.id,
-          row.client_id,
-          delivered.channel,
-          row.phone ?? "",
-          body,
-          delivered.error ? "failed" : "delivered",
-          delivered.error,
-          ctx.now.toISOString(),
+      const link = await manageLink(ctx, row.id);
+      const { values } = await appointmentValues(ctx, row.id, { ссылка: link });
+      const sent = await deliverToClient(ctx, {
+        clientId: row.client_id,
+        branchId: branch.id,
+        appointmentId: row.id,
+        kind: "reminder",
+        body: render(template, values),
+        buttons: [
+          { text: "Подтверждаю", data: `c:${row.id}` },
+          { text: "Отменить", data: `x:${row.id}` },
         ],
-      );
+        once: true,
+      });
+      if (!sent) continue;
+      const delivered = { channel: sent.channel, error: sent.error };
       await audit(ctx, {
         branchId: branch.id,
         entity: "appointment",
