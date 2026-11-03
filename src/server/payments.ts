@@ -35,19 +35,21 @@ export async function syncAppointmentDebt(ctx: Ctx, appointmentId: string) {
        AND pl.line_type IN ('service', 'deposit')`,
     [appointmentId],
   );
-  const settlementRow = await one<{ s: number }>(
+  // Debt follows money received: a refund is the salon giving money back, not the client owing more.
+  const receivedRow = await one<{ paid: number; settled: number }>(
     ctx.db,
-    `SELECT ${NET_AMOUNT} AS s
+    `SELECT COALESCE(SUM(pl.amount_minor) FILTER (WHERE pl.line_type IN ('service', 'deposit')), 0)::int AS paid,
+            COALESCE(SUM(pl.amount_minor) FILTER (WHERE pl.line_type = 'service'), 0)::int AS settled
      FROM payment_lines pl
      JOIN payments p ON p.id = pl.payment_id
-     WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT}
-       AND pl.line_type = 'service'`,
+     WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT} AND p.direction = 'in'`,
     [appointmentId],
   );
   const price = Number(priceRow?.s ?? 0);
   const paid = Number(paidRow?.s ?? 0);
-  const settled = Number(settlementRow?.s ?? 0);
-  const newDebt = appt.status !== "cancelled" && settled > 0 && paid < price ? price - paid : 0;
+  const received = Number(receivedRow?.paid ?? 0);
+  const settled = Number(receivedRow?.settled ?? 0);
+  const newDebt = appt.status !== "cancelled" && settled > 0 && received < price ? price - received : 0;
   const overpaid = paid > price ? paid - price : 0;
   const delta = newDebt - Number(appt.debt_minor);
   if (delta !== 0 && appt.client_id) {

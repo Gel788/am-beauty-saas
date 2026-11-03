@@ -312,4 +312,14 @@ describe("cash shifts and refunds", () => {
       code: "SHIFT_CLOSED",
     });
   });
+
+  it("PAY-REFUND-02 partial refund of a fully paid visit leaves no debt", async () => {
+    const z = await visit();
+    const paid = await pay(z.id, [{ method: "card", amountMinor: 150000 }]);
+    const before = await balance();
+    const refund = await run(salon.admin, (ctx) => refundPayment(ctx, paid.id, { amountMinor: 30000, reason: "компенсация" }));
+    expect(refund.paidMinor).toBe(120000);
+    expect(refund.debtMinor).toBe(0);
+    expect(await balance()).toBe(before);
+  });
 });
