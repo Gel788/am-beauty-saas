@@ -1,0 +1,338 @@
+import { NextRequest, NextResponse } from "next/server";
+import { isAppError } from "@/domain/errors";
+import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
+import {
+  cancelAppointment,
+  changeStatus,
+  createAppointment,
+  exportAppointmentsCsv,
+  getAppointment,
+  getJournal,
+  hardDeleteAppointment,
+  moveAppointment,
+  previousClient,
+  resizeAppointment,
+  restoreAppointment,
+  searchAppointments,
+  updateAppointment,
+} from "@/server/appointments";
+import { adjustBalance, clientHistory, createClient, deleteClient, getClient, listClients, updateClient } from "@/server/clients";
+import {
+  addException,
+  copyExceptionsToNextWeek,
+  createCategory,
+  createService,
+  createStaff,
+  deactivateService,
+  deactivateStaff,
+  deleteCategory,
+  getWeekTemplate,
+  listCatalog,
+  listStaff,
+  reorderServices,
+  saveWeekTemplate,
+  setServiceStaff,
+  updateService,
+  updateStaff,
+} from "@/server/catalog";
+import { createPayment, currentShift, listPayments, openShift } from "@/server/payments";
+import { dashboard } from "@/server/dashboard";
+import { listBranches, updateBranch } from "@/server/settings";
+import type { Actor } from "@/server/types";
+import type { AppointmentStatus } from "@/domain/status";
+
+export const dynamic = "force-dynamic";
+
+function fail(error: unknown) {
+  if (isAppError(error)) {
+    const status = {
+      FORBIDDEN: 403,
+      VALIDATION: 400,
+      CONFLICT_SLOT: 409,
+      SHIFT_REQUIRED: 409,
+      SHIFT_CLOSED: 409,
+      NOT_FOUND: 404,
+      STALE: 409,
+      SOFT_CONFIRM: 409,
+    }[error.code];
+    return NextResponse.json({ error: { code: error.code, message: error.message, details: error.details ?? null } }, { status });
+  }
+  console.error(error);
+  return NextResponse.json({ error: { code: "INTERNAL", message: "Не получилось выполнить операцию" } }, { status: 500 });
+}
+
+function cookie(response: NextResponse, token: string) {
+  response.cookies.set("ab_session", token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+  return response;
+}
+
+async function readJson(request: NextRequest) {
+  const text = await request.text();
+  if (!text) return {};
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+async function handle(request: NextRequest, parts: string[]) {
+  const method = request.method;
+  const key = `${method} ${parts.join("/")}`;
+  const url = request.nextUrl;
+
+  if (key === "POST auth/login") {
+    const body = await readJson(request);
+    const result = await login(String(body.email ?? ""), String(body.password ?? ""));
+    return cookie(NextResponse.json({ actor: result.actor }), result.token);
+  }
+  if (key === "POST auth/register") {
+    const body = await readJson(request);
+    const result = await register({
+      email: String(body.email ?? ""),
+      password: String(body.password ?? ""),
+      name: String(body.name ?? ""),
+      salonName: String(body.salonName ?? ""),
+      branchName: body.branchName ? String(body.branchName) : undefined,
+      timezone: body.timezone ? String(body.timezone) : undefined,
+    });
+    return cookie(NextResponse.json({ actor: result.actor }), result.token);
+  }
+  if (key === "POST auth/logout") {
+    const token = request.cookies.get("ab_session")?.value;
+    if (token) await logout(token);
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set("ab_session", "", { httpOnly: true, path: "/", maxAge: 0 });
+    return response;
+  }
+
+  const actor = await actorFromToken(request.cookies.get("ab_session")?.value);
+  if (!actor) {
+    return NextResponse.json({ error: { code: "FORBIDDEN", message: "Нужно войти" } }, { status: 401 });
+  }
+
+  if (key === "GET auth/me") {
+    const branches = await asActor(actor, (ctx) => listBranches(ctx));
+    const density = await getDensity(actor.userId);
+    return NextResponse.json({ actor, branches, density });
+  }
+  if (key === "PUT preferences") {
+    const body = await readJson(request);
+    const density = String(body.density ?? "auto") as "auto" | "comfortable" | "compact";
+    await setDensity(actor.userId, density);
+    return NextResponse.json({ density });
+  }
+
+  const run = <T>(fn: (ctx: Parameters<Parameters<typeof asActor<T>>[1]>[0]) => Promise<T>) => asActor(actor, fn);
+
+  if (key === "GET branches") return NextResponse.json(await run((ctx) => listBranches(ctx)));
+  if (method === "PATCH" && parts[0] === "branches" && parts[1]) {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateBranch(ctx, parts[1], body)));
+  }
+  if (key === "GET dashboard") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => dashboard(ctx, branchId)));
+  }
+  if (key === "GET journal") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    const staffIds = url.searchParams.get("staffIds")?.split(",").filter(Boolean);
+    return NextResponse.json(
+      await run((ctx) =>
+        getJournal(ctx, {
+          branchId,
+          date: url.searchParams.get("date") || new Date().toISOString().slice(0, 10),
+          staffIds,
+          showOff: url.searchParams.get("showOff") === "1",
+          showCancelled: url.searchParams.get("showCancelled") === "1",
+        }),
+      ),
+    );
+  }
+  if (key === "GET search") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => searchAppointments(ctx, branchId, url.searchParams.get("q") ?? "")));
+  }
+  if (key === "GET export") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    const csv = await run((ctx) =>
+      exportAppointmentsCsv(ctx, {
+        branchId,
+        date: url.searchParams.get("date") || new Date().toISOString().slice(0, 10),
+        staffId: url.searchParams.get("staffId") || undefined,
+        status: url.searchParams.get("status") || undefined,
+      }),
+    );
+    return new NextResponse(csv, { headers: { "Content-Type": "text/csv; charset=utf-8" } });
+  }
+  if (key === "GET prev-client") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(
+      await run((ctx) => previousClient(ctx, branchId, url.searchParams.get("staffId") || "", url.searchParams.get("date") || "")),
+    );
+  }
+  if (key === "POST appointments") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createAppointment(ctx, body as never)));
+  }
+  if (parts[0] === "appointments" && parts[1] && !parts[2] && method === "GET") {
+    return NextResponse.json(await run((ctx) => getAppointment(ctx, parts[1])));
+  }
+  if (parts[0] === "appointments" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateAppointment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "appointments" && parts[1] && !parts[2] && method === "DELETE") {
+    await run((ctx) => hardDeleteAppointment(ctx, parts[1]));
+    return NextResponse.json({ ok: true });
+  }
+  if (parts[0] === "appointments" && parts[2] === "cancel" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => cancelAppointment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "appointments" && parts[2] === "restore" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => restoreAppointment(ctx, parts[1], Number(body.version))));
+  }
+  if (parts[0] === "appointments" && parts[2] === "move" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => moveAppointment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "appointments" && parts[2] === "resize" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => resizeAppointment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "appointments" && parts[2] === "status" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(
+      await run((ctx) => changeStatus(ctx, parts[1], String(body.status) as AppointmentStatus, { version: Number(body.version), acknowledgeSoft: Boolean(body.acknowledgeSoft) })),
+    );
+  }
+
+  if (key === "GET clients") return NextResponse.json(await run((ctx) => listClients(ctx, url.searchParams.get("q") ?? "")));
+  if (key === "POST clients") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createClient(ctx, body as never)));
+  }
+  if (parts[0] === "clients" && parts[1] && !parts[2] && method === "GET") {
+    return NextResponse.json(await run((ctx) => getClient(ctx, parts[1])));
+  }
+  if (parts[0] === "clients" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateClient(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "clients" && parts[2] === "delete" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => deleteClient(ctx, parts[1], body.decision as never)));
+  }
+  if (parts[0] === "clients" && parts[2] === "history" && method === "GET") {
+    return NextResponse.json(await run((ctx) => clientHistory(ctx, parts[1], url.searchParams.get("branchId") || undefined)));
+  }
+  if (parts[0] === "clients" && parts[2] === "balance" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => adjustBalance(ctx, parts[1], Number(body.amountMinor), String(body.reason ?? ""))));
+  }
+
+  if (key === "GET catalog") return NextResponse.json(await run((ctx) => listCatalog(ctx)));
+  if (key === "POST categories") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createCategory(ctx, String(body.title ?? ""))));
+  }
+  if (parts[0] === "categories" && parts[1] && method === "DELETE") {
+    await run((ctx) => deleteCategory(ctx, parts[1]));
+    return NextResponse.json({ ok: true });
+  }
+  if (key === "POST services") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createService(ctx, body as never)));
+  }
+  if (key === "POST services/reorder") {
+    const body = await readJson(request);
+    await run((ctx) => reorderServices(ctx, (body.ids as string[]) ?? []));
+    return NextResponse.json({ ok: true });
+  }
+  if (parts[0] === "services" && parts[1] && parts[2] === "deactivate" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => deactivateService(ctx, parts[1], Boolean(body.hard))));
+  }
+  if (parts[0] === "services" && parts[1] && parts[2] === "staff" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => setServiceStaff(ctx, parts[1], (body.staffIds as string[]) ?? [], Boolean(body.acknowledgeSoft))));
+  }
+  if (parts[0] === "services" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateService(ctx, parts[1], body as never)));
+  }
+
+  if (key === "GET staff") return NextResponse.json(await run((ctx) => listStaff(ctx)));
+  if (key === "POST staff") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createStaff(ctx, body as never)));
+  }
+  if (parts[0] === "staff" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateStaff(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "staff" && parts[2] === "deactivate" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(
+      await run((ctx) => deactivateStaff(ctx, parts[1], body.decision as never, body.reassignToStaffId as string | undefined)),
+    );
+  }
+  if (parts[0] === "staff" && parts[2] === "schedule" && method === "GET") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => getWeekTemplate(ctx, parts[1], branchId)));
+  }
+  if (parts[0] === "staff" && parts[2] === "schedule" && method === "PUT") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, String(body.branchId ?? ""));
+    return NextResponse.json(await run((ctx) => saveWeekTemplate(ctx, { staffId: parts[1], branchId, intervals: body.intervals as never })));
+  }
+  if (parts[0] === "staff" && parts[2] === "exceptions" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => addException(ctx, { ...(body as object), staffId: parts[1] } as never)));
+  }
+  if (parts[0] === "staff" && parts[2] === "copy-week" && method === "POST") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, String(body.branchId ?? ""));
+    return NextResponse.json(await run((ctx) => copyExceptionsToNextWeek(ctx, parts[1], branchId, String(body.date ?? ""))));
+  }
+
+  if (key === "POST shifts/open") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => openShift(ctx, body as never)));
+  }
+  if (key === "GET shifts/current") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => currentShift(ctx, branchId)));
+  }
+  if (key === "GET payments") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listPayments(ctx, branchId, url.searchParams.get("date") || undefined)));
+  }
+  if (key === "POST payments") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createPayment(ctx, body as never)));
+  }
+
+  return NextResponse.json({ error: { code: "NOT_FOUND", message: "Не найдено" } }, { status: 404 });
+}
+
+async function resolveBranch(actor: Actor, requested: string | null) {
+  if (requested) return requested;
+  if (actor.branchId) return actor.branchId;
+  const branches = await asActor(actor, (ctx) => listBranches(ctx));
+  if (!branches[0]) throw new Error("Нет филиала");
+  return branches[0].id;
+}
+
+async function dispatch(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  try {
+    const { path } = await context.params;
+    return await handle(request, path);
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export const GET = dispatch;
+export const POST = dispatch;
+export const PATCH = dispatch;
+export const PUT = dispatch;
+export const DELETE = dispatch;
