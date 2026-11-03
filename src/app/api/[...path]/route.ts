@@ -49,6 +49,7 @@ import {
   voidPayment,
 } from "@/server/cash";
 import { dashboard } from "@/server/dashboard";
+import { dayReport } from "@/server/reports";
 import {
   asOnline,
   cancelBooking,
@@ -159,6 +160,10 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "GET dashboard") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dashboard(ctx, branchId)));
+  }
+  if (key === "GET reports/day") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => dayReport(ctx, branchId, url.searchParams.get("date") ?? "")));
   }
   if (key === "GET journal") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
