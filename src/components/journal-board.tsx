@@ -9,7 +9,6 @@ import { addCalendarDays, todayInZone, weekdayLabel, zonedDateTimeToUtc } from "
 import { hitTestColumn, pointerIntent, resolveDrop } from "@/domain/grid";
 import { api, type ApiError } from "./api";
 import { RecordDrawer, type DrawerSeed } from "./record-drawer";
-import Image from "next/image";
 import { portraitFor } from "./portraits";
 import { useToast } from "./ui";
 
@@ -168,10 +167,11 @@ export function JournalBoard() {
       return (left === -1 ? 99 : left) - (right === -1 ? 99 : right);
     });
   }, [journal]);
-  const px = journal?.density === "compact" ? 0.78 : 0.9;
+  const [trackH, setTrackH] = useState(0);
   const dayStart = journal?.dayStartMin ?? 600;
   const dayEnd = journal?.dayEndMin ?? 1200;
-  const height = (dayEnd - dayStart) * px;
+  const span = Math.max(30, dayEnd - dayStart);
+  const px = trackH > 0 ? trackH / span : journal?.density === "compact" ? 0.9 : 1.15;
 
   async function commitDrag(current: Drag) {
     const decision = resolveDrop({ outside: current.outside, staffId: current.previewStaff, hardInvalid: current.invalid });
@@ -286,6 +286,19 @@ export function JournalBoard() {
   const step = journal?.branch.gridLabelMin ?? 60;
   for (let minute = dayStart; minute <= dayEnd; minute += step) hours.push(minute);
 
+  useEffect(() => {
+    const root = columnsRef.current;
+    if (!root) return;
+    const measure = () => {
+      const col = root.querySelector(".day-col");
+      if (col) setTrackH(col.getBoundingClientRect().height);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [journal, view, visibleStaff.length]);
+
   const nowMin = (() => {
     const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
     const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
@@ -368,7 +381,7 @@ export function JournalBoard() {
                 const photo = portraitFor(staff.name);
                 return (
                   <div className="master-head" key={staff.id}>
-                    {photo ? <Image className="face" src={photo} alt="" width={36} height={36} /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
+                    {photo ? <img className="face" src={photo} alt="" /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <strong>{staff.name}</strong>
                       <div className="load" aria-label={`Загрузка ${staff.loadPercent}%`}>
@@ -379,29 +392,28 @@ export function JournalBoard() {
                   </div>
                 );
               })}
-              <div className="gutter" style={{ height, position: "relative" }}>
+              <div className="gutter">
                 {hours.map((minute) => (
-                  <div key={minute} className="hour-label" style={{ top: (minute - dayStart) * px }}>
+                  <div key={minute} className="hour-label" style={{ top: `${((minute - dayStart) / span) * 100}%` }}>
                     {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
                   </div>
                 ))}
-                {showNow && <div className="now-pill" style={{ top: (nowMin - dayStart) * px }}>{`${String(Math.floor(nowMin / 60)).padStart(2, "0")}:${String(nowMin % 60).padStart(2, "0")}`}</div>}
+                {showNow && <div className="now-pill" style={{ top: `${((nowMin - dayStart) / span) * 100}%` }}>{`${String(Math.floor(nowMin / 60)).padStart(2, "0")}:${String(nowMin % 60).padStart(2, "0")}`}</div>}
               </div>
               {visibleStaff.map((staff) => (
                 <div
                   key={staff.id}
                   className="day-col"
                   data-staff={staff.id}
-                  style={{ height }}
                   onClick={(event) => {
                     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
                     const minute = dayStart + Math.round((event.clientY - rect.top) / px / 5) * 5;
                     setSeed({ staffId: staff.id, startMin: minute, date });
                   }}
                 >
-                  {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: (minute - dayStart) * px }} />)}
+                  {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: `${((minute - dayStart) / span) * 100}%` }} />)}
                   {showNow && staff.id === visibleStaff[0].id && (
-                    <div className="now-line" style={{ top: (nowMin - dayStart) * px, left: 0, width: `${visibleStaff.length * 100}%` }} />
+                    <div className="now-line" style={{ top: `${((nowMin - dayStart) / span) * 100}%`, left: 0, width: `${visibleStaff.length * 100}%` }} />
                   )}
                   {journal.appointments.filter((appt) => appt.staffId === staff.id).map((appt) => {
                     const preview = drag?.id === appt.id && drag.active ? drag : null;
@@ -409,13 +421,16 @@ export function JournalBoard() {
                     const end = preview && preview.previewStaff === staff.id ? preview.previewEnd : appt.endMin;
                     const movedAway = preview && preview.previewStaff !== staff.id;
                     const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+                    const blockPx = ((end - start) / span) * (trackH || span * px);
+                    const serviceTitle = `${appt.services[0]?.title ?? ""}${appt.services.length > 1 ? ` +${appt.services.length - 1}` : ""}`;
+                    const tight = blockPx < 54;
                     return (
                       <button
                         key={appt.id}
                         className={`appt ${appt.status === "cancelled" ? "cancelled" : ""} ${preview ? "preview" : ""} ${preview?.invalid ? "bad" : ""}`}
                         style={{
-                          top: (start - dayStart) * px,
-                          height: Math.max(36, (end - start) * px - 6),
+                          top: `${((start - dayStart) / span) * 100}%`,
+                          height: `calc(${((end - start) / span) * 100}% - 3px)`,
                           background: `linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)), ${appt.color}`,
                           borderLeft: "3px solid rgba(80, 30, 70, 0.18)",
                           opacity: movedAway ? 0.35 : 1,
@@ -423,16 +438,22 @@ export function JournalBoard() {
                         onPointerDown={(event) => onBlockPointerDown(event, appt, "move")}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <span className="when">{hh(start)}–{hh(end)}</span>
-                        <b>{appt.clientName || "Без имени"}</b>
-                        <small>{appt.services[0]?.title}{appt.services.length > 1 ? ` +${appt.services.length - 1}` : ""}</small>
+                        {tight ? (
+                          <b>{appt.clientName || "Без имени"}{serviceTitle ? ` · ${serviceTitle}` : ""}</b>
+                        ) : (
+                          <>
+                            {blockPx >= 72 && <span className="when">{hh(start)}–{hh(end)}</span>}
+                            <b>{appt.clientName || "Без имени"}</b>
+                            {serviceTitle && <small>{serviceTitle}</small>}
+                          </>
+                        )}
                         {appt.source === "online" && <span className="ai-badge">AI</span>}
                         <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
                       </button>
                     );
                   })}
                   {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
-                    <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: (drag.previewStart - dayStart) * px, height: Math.max(36, (drag.previewEnd - drag.previewStart) * px), background: "#efe7ff" }} />
+                    <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: `${((drag.previewStart - dayStart) / span) * 100}%`, height: `calc(${((drag.previewEnd - drag.previewStart) / span) * 100}% - 3px)`, background: "#efe7ff" }} />
                   )}
                 </div>
               ))}

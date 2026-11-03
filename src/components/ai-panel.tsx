@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { portraitFor } from "./portraits";
 
 export function AiPanel() {
@@ -14,7 +13,7 @@ export function AiPanel() {
         </div>
       </div>
       <div className="chat-person">
-        <Image className="face" src={portraitFor("Виктория Павлова") ?? "/staff/victoria.jpg"} alt="" width={36} height={36} />
+        <img className="face" src={portraitFor("Виктория Павлова") ?? "/staff/victoria.jpg"} alt="" />
         <div>
           <strong>Виктория Павлова</strong>
           <span className="muted"> постоянный клиент · 7 визитов</span>

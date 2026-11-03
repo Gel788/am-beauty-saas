@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { formatMoney } from "@/domain/money";
 import { api } from "./api";
 import { portraitFor } from "./portraits";
@@ -128,7 +127,7 @@ export function DashboardView() {
               <div className="sys-card">
                 {(data.journal?.staff ?? []).slice().sort((a, b) => b.loadPercent - a.loadPercent)[0]?.name ?? "Мастер"} загружен на {(data.journal?.staff ?? []).slice().sort((a, b) => b.loadPercent - a.loadPercent)[0]?.loadPercent ?? 0}%
                 <div className="muted">Поднять цену стрижки на 200 ₽</div>
-                <div className="spread" style={{ marginTop: 8 }}><span /><button className="btn-ghost" type="button">Подробнее</button></div>
+                <button className="btn-ghost" type="button" style={{ marginTop: 8 }}>Подробнее</button>
               </div>
             </div>
           </div>
@@ -144,7 +143,7 @@ export function DashboardView() {
               {(data.journal?.staff ?? []).slice().sort((a, b) => ["Алина Ковалёва", "Марина Соколова", "Денис Волков", "Елена Лебедева"].indexOf(a.name) - ["Алина Ковалёва", "Марина Соколова", "Денис Волков", "Елена Лебедева"].indexOf(b.name)).map((staff) => (
                 <div key={staff.id} className="spread" style={{ marginTop: 10 }}>
                   <div className="row" style={{ minWidth: 0 }}>
-                    {portraitFor(staff.name) ? <Image className="face" src={portraitFor(staff.name) ?? "/staff/alina.jpg"} alt="" width={36} height={36} /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
+                    {portraitFor(staff.name) ? <img className="face" src={portraitFor(staff.name) ?? "/staff/alina.jpg"} alt="" /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
                     <span style={{ whiteSpace: "nowrap" }}>{staff.name}</span>
                   </div>
                   <div className="load" style={{ width: 120 }}><i><span style={{ width: `${Math.min(100, staff.loadPercent)}%` }} /></i><em>{staff.loadPercent}%</em></div>
@@ -175,7 +174,7 @@ export function DashboardView() {
                 <div className="muted">Пришли повторно за 60 дней</div>
                 <div className="row" style={{ justifyContent: "center", marginTop: 8 }}>
                   {["/staff/alina.jpg", "/staff/marina.jpg", "/staff/denis.jpg"].map((src) => (
-                    <Image key={src} src={src} alt="" width={22} height={22} className="face" />
+                    <img key={src} src={src} alt="" width={22} height={22} className="face" />
                   ))}
                 </div>
               </div>

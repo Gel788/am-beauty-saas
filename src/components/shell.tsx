@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -65,7 +64,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
           {branch && (
             <button className="salon-switch" type="button">
-              <Image src={SALON_PHOTO} alt="" width={36} height={36} />
+              <img src={SALON_PHOTO} alt="" />
               <div>
                 <strong>{branch.name}</strong>
                 <span>Филиал 1 из {Math.max(me?.branches.length ?? 1, 1)}</span>
@@ -94,7 +93,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
           {me && (
             <div className="user-row">
-              <Image className="face" src={ownerPhoto} alt="" width={36} height={36} />
+              <img className="face" src={ownerPhoto} alt="" />
               <div>
                 <strong>{me.actor.name}</strong>
                 <span>{ROLES[me.actor.role] ?? me.actor.role}</span>

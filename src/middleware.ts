@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/login") || pathname.startsWith("/register") || pathname.startsWith("/api")) {
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/staff/") ||
+    /\.(?:png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(pathname)
+  ) {
     return NextResponse.next();
   }
   if (!request.cookies.get("ab_session")) {
