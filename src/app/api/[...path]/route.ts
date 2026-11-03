@@ -1,3 +1,4 @@
+import { pool } from "@/server/db";
 import { NextRequest, NextResponse } from "next/server";
 import { isAppError } from "@/domain/errors";
 import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
@@ -152,7 +153,13 @@ function fail(error: unknown) {
 }
 
 function cookie(response: NextResponse, token: string) {
-  response.cookies.set("ab_session", token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+  response.cookies.set("ab_session", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    secure: process.env.NODE_ENV === "production",
+  });
   return response;
 }
 
@@ -193,6 +200,15 @@ async function handle(request: NextRequest, parts: string[]) {
   }
 
   if (parts[0] === "public") return handlePublic(request, parts.slice(1));
+  if (key === "GET health") {
+    // Liveness + database reachability for the container healthcheck and uptime monitors.
+    try {
+      await pool.query("SELECT 1");
+      return NextResponse.json({ ok: true, db: "up", time: new Date().toISOString() });
+    } catch {
+      return NextResponse.json({ ok: false, db: "down" }, { status: 503 });
+    }
+  }
   if (key === "POST jobs/reminders") {
     // Called by cron; without JOBS_TOKEN configured the endpoint stays closed.
     const expected = process.env.JOBS_TOKEN;

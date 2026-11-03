@@ -45,4 +45,12 @@ for (const name of files) {
   }
 }
 if (applied === 0) console.log("Schema up to date");
+// Production: the app role must not keep the development password from 001_init.sql.
+if (process.env.APP_DB_PASSWORD) {
+  const quoted = (await client.query("SELECT quote_literal($1) AS q", [process.env.APP_DB_PASSWORD])).rows[0].q;
+  await client.query(`ALTER ROLE app_user PASSWORD ${quoted}`);
+  console.log("app_user password set from APP_DB_PASSWORD");
+} else if (process.env.NODE_ENV === "production") {
+  throw new Error("APP_DB_PASSWORD is required in production");
+}
 await client.end();

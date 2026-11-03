@@ -1,0 +1,89 @@
+# Production stack for one server: Postgres, the app, HTTPS, nightly backups, reminder cron.
+# Usage: see docs/DEPLOY.md.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: ambeauty
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ambeauty"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: ambeauty:latest
+    build: ..
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MIGRATE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ambeauty
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in deploy/.env}
+    command: ["node", "scripts/migrate.mjs"]
+
+  app:
+    image: ambeauty:latest
+    build: ..
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://app_user:${APP_DB_PASSWORD}@postgres:5432/ambeauty
+      JOBS_TOKEN: ${JOBS_TOKEN:?set JOBS_TOKEN in deploy/.env}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+
+  # Nightly pg_dump, keeps the last 14 days in ./backups (copy that folder off the server too).
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "-c", "while true; do sh /backup.sh; sleep 86400; done"]
+
+  # Sends due reminders every 5 minutes (MSG-AUTO-01).
+  cron:
+    image: alpine:3.20
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      JOBS_TOKEN: ${JOBS_TOKEN}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl >/dev/null
+        while true; do
+          curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/reminders >/dev/null || echo "reminders job failed"
+          sleep 300
+        done
+
+volumes:
+  pgdata:
+  caddy_data:
