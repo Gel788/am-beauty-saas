@@ -8,6 +8,8 @@ import { LIVE_PAYMENT, assertMoney, insertPayment, requireShift, syncAppointment
 import type { Ctx } from "./types";
 import { afterPaymentVoided } from "./inventory";
 import { afterPaymentVoided as loyaltyAfterVoided } from "./loyalty";
+import { afterPaymentVoidedFiscal, receiptStatuses } from "./fiscal";
+import { ACQUIRING_ACTOR_ID } from "./acquiring";
 
 const CASH_ROLES = ["owner", "admin", "accountant", "super"];
 const METHODS = ["cash", "card", "sbp", "transfer"] as const;
@@ -389,6 +391,7 @@ async function describePayments(ctx: Ctx, where: string, params: unknown[], limi
     [ids],
   );
   const refundedBy = new Map(refunded.map((row) => [row.refund_of_id, Number(row.s)]));
+  const receipts = await receiptStatuses(ctx, ids);
   const active = await one<{ id: string }>(
     ctx.db,
     "SELECT id FROM cash_shifts WHERE branch_id = $1 AND status = 'open'",
@@ -413,13 +416,14 @@ async function describePayments(ctx: Ctx, where: string, params: unknown[], limi
       refundReason: row.refund_reason,
       voidReason: row.void_reason,
       postedAt: row.posted_at ? new Date(row.posted_at).toISOString() : null,
-      createdByName: row.created_by_name ?? FORMER,
+      createdByName: row.created_by_name ?? (row.created_by === ACQUIRING_ACTOR_ID ? "Онлайн-оплата" : FORMER),
       lines: lines
         .filter((line) => line.payment_id === row.id)
         .map((line) => ({ id: line.id, type: line.line_type, title: line.title, amountMinor: Number(line.amount_minor), refundOfLineId: line.refund_of_line_id })),
       tenders: own.map((tender) => ({ method: tender.method, amountMinor: Number(tender.amount_minor) })),
       refundedMinor,
       refundableMinor,
+      receipts: receipts.get(row.id) ?? [],
       canRefund: refundableMinor > 0 && Boolean(active),
       canVoid:
         row.direction === "in" &&
@@ -707,6 +711,7 @@ export async function voidPayment(ctx: Ctx, paymentId: string, input: { reason?:
   }
   await afterPaymentVoided(ctx, paymentId);
   await loyaltyAfterVoided(ctx, paymentId);
+  await afterPaymentVoidedFiscal(ctx, paymentId);
   const synced = await afterMoneyChange(ctx, original.appointment_id);
   await audit(ctx, {
     branchId: original.branch_id,

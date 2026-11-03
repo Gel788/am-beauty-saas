@@ -67,7 +67,7 @@ services:
       - ./backup.sh:/backup.sh:ro
     entrypoint: ["sh", "-c", "while true; do sh /backup.sh; sleep 86400; done"]
 
-  # Sends due reminders every 5 minutes (MSG-AUTO-01).
+  # Every 5 minutes: due reminders (MSG-AUTO-01) and receipts waiting for a retry (FISC-RETRY-01).
   cron:
     image: alpine:3.20
     restart: unless-stopped
@@ -81,6 +81,7 @@ services:
         apk add --no-cache curl >/dev/null
         while true; do
           curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/reminders >/dev/null || echo "reminders job failed"
+          curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/fiscal >/dev/null || echo "fiscal job failed"
           sleep 300
         done
 

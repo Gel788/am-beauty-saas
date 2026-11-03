@@ -2,6 +2,8 @@ import { AppError } from "@/domain/errors";
 import { isAdminPlus, loadBranch } from "./access";
 import { many, one } from "./db";
 import type { BranchRow, Ctx } from "./types";
+import { fiscalProviders } from "./fiscal";
+import { acquiringProviders } from "./acquiring";
 
 export async function listBranches(ctx: Ctx) {
   const rows = await many<BranchRow>(
@@ -47,6 +49,15 @@ export function presentBranch(branch: BranchRow) {
     accrueOnCompleteUnpaid: branch.accrue_on_complete_unpaid,
     consumePolicy: branch.consume_policy,
     allowNegativeStock: branch.allow_negative_stock,
+    fiscalEnabled: branch.fiscal_enabled,
+    fiscalProvider: branch.fiscal_provider,
+    fiscalInn: branch.fiscal_inn,
+    fiscalTaxation: branch.fiscal_taxation,
+    fiscalVat: branch.fiscal_vat,
+    fiscalPlace: branch.fiscal_place,
+    acquiringEnabled: branch.acquiring_enabled,
+    acquiringProvider: branch.acquiring_provider,
+    acquiringLinkHours: Number(branch.acquiring_link_hours),
   };
 }
 
@@ -57,6 +68,7 @@ const INT_FIELDS: Record<string, [number, number, string]> = {
   onlineCancelHours: [0, 720, "Отмена клиентом: от 0 до 720 часов"],
   onlineMaxActivePerPhone: [1, 50, "Будущих записей на телефон: от 1 до 50"],
   reminderHours: [1, 168, "Напоминание: от 1 до 168 часов до визита"],
+  acquiringLinkHours: [1, 168, "Ссылка на оплату действует от 1 до 168 часов"],
 };
 
 /** The salon part of the public link /b/{tenantSlug}/{branchSlug}. Owner only. */
@@ -100,7 +112,46 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     accrueOnCompleteUnpaid: "accrue_on_complete_unpaid",
     consumePolicy: "consume_policy",
     allowNegativeStock: "allow_negative_stock",
+    fiscalEnabled: "fiscal_enabled",
+    fiscalProvider: "fiscal_provider",
+    fiscalInn: "fiscal_inn",
+    fiscalTaxation: "fiscal_taxation",
+    fiscalVat: "fiscal_vat",
+    fiscalPlace: "fiscal_place",
+    acquiringEnabled: "acquiring_enabled",
+    acquiringProvider: "acquiring_provider",
+    acquiringLinkHours: "acquiring_link_hours",
   };
+  // Forms send the whole branch back, so only a changed value counts as an attempt.
+  const before = presentBranch(await loadBranch(ctx, id)) as Record<string, unknown>;
+  const fiscalKeys = ["fiscalEnabled", "fiscalProvider", "fiscalInn", "fiscalTaxation", "fiscalVat", "fiscalPlace", "acquiringEnabled", "acquiringProvider", "acquiringLinkHours"];
+  if (fiscalKeys.some((key) => input[key] !== undefined && input[key] !== before[key]) && ctx.actor.role !== "owner" && ctx.actor.role !== "super") {
+    throw new AppError("FORBIDDEN", "Кассу и онлайн-оплату настраивает владелец");
+  }
+  if (input.fiscalInn !== undefined) {
+    input.fiscalInn = String(input.fiscalInn).trim();
+    if (input.fiscalInn && !/^(\d{10}|\d{12})$/.test(String(input.fiscalInn))) throw new AppError("VALIDATION", "ИНН — 10 цифр для организации или 12 для ИП");
+  }
+  if (input.fiscalPlace !== undefined) input.fiscalPlace = String(input.fiscalPlace).trim().slice(0, 256);
+  if (input.fiscalTaxation !== undefined && !["osn", "usn_income", "usn_income_outcome", "esn", "patent"].includes(String(input.fiscalTaxation))) {
+    throw new AppError("VALIDATION", "Неизвестная система налогообложения");
+  }
+  if (input.fiscalVat !== undefined && !["none", "vat0", "vat5", "vat7", "vat10", "vat20"].includes(String(input.fiscalVat))) {
+    throw new AppError("VALIDATION", "Неизвестная ставка НДС");
+  }
+  if (input.fiscalProvider !== undefined && !fiscalProviders().some((provider) => provider.name === input.fiscalProvider)) {
+    throw new AppError("VALIDATION", "Такой онлайн-кассы нет");
+  }
+  if (input.acquiringProvider !== undefined && !acquiringProviders().some((provider) => provider.name === input.acquiringProvider)) {
+    throw new AppError("VALIDATION", "Такого провайдера оплаты нет");
+  }
+  if (input.fiscalEnabled === true) {
+    const current = await loadBranch(ctx, id);
+    const inn = String(input.fiscalInn ?? current.fiscal_inn);
+    const place = String(input.fiscalPlace ?? current.fiscal_place);
+    if (!inn) throw new AppError("VALIDATION", "Чтобы включить чеки, укажите ИНН");
+    if (!place) throw new AppError("VALIDATION", "Чтобы включить чеки, укажите адрес расчётов");
+  }
   for (const [key, [min, max, message]] of Object.entries(INT_FIELDS)) {
     if (input[key] === undefined) continue;
     const value = Number(input[key]);

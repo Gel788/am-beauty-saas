@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatMoney, rublesToMinor } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { Modal, useToast } from "./ui";
@@ -26,7 +26,93 @@ export type PaymentItem = {
   refundableMinor: number;
   canRefund: boolean;
   canVoid: boolean;
+  receipts?: { id: string; kind: string; status: string }[];
 };
+
+type ReceiptDetail = {
+  id: string;
+  kind: "sell" | "sell_refund";
+  status: "pending" | "sent" | "done" | "failed" | "canceled";
+  totalMinor: number;
+  fnNumber: string | null;
+  fdNumber: string | null;
+  fiscalSign: string | null;
+  registeredAt: string | null;
+  ofdUrl: string | null;
+  error: string | null;
+  provider: string;
+  items: { name: string; sumMinor: number; paymentMethod: string }[];
+  payments: { type: string; sumMinor: number }[];
+};
+
+const RECEIPT_STATUS: Record<string, [string, string]> = {
+  pending: ["чек в очереди", "tag-muted"],
+  sent: ["чек отправлен", "tag-muted"],
+  done: ["чек ✓", "tag-ok"],
+  failed: ["чек: ошибка", "tag-bad"],
+  canceled: ["чек отменён", "tag-muted"],
+};
+const RECEIPT_PAYMENT: Record<string, string> = { cash: "Наличными", electronic: "Безналичными", prepaid: "Зачёт предоплаты" };
+
+/** The receipt that matters for the row: the reversal if any, otherwise the sale. */
+function mainReceipt(payment: PaymentItem) {
+  const list = payment.receipts ?? [];
+  return list.find((receipt) => receipt.status === "failed") ?? list[list.length - 1] ?? null;
+}
+
+function ReceiptBlock({ paymentId, onChanged }: { paymentId: string; onChanged: () => void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<ReceiptDetail[] | null>(null);
+  const load = () => api<ReceiptDetail[]>(`/api/fiscal/receipts?paymentId=${paymentId}`).then(setRows).catch(() => setRows([]));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentId]);
+  if (!rows?.length) return null;
+  return (
+    <div className="list" style={{ gap: 4, marginTop: 6, paddingTop: 6, borderTop: "1px dashed var(--line)" }}>
+      {rows.map((receipt) => (
+        <div key={receipt.id} className="list" style={{ gap: 2 }}>
+          <div className="spread">
+            <b style={{ fontSize: 13 }}>{receipt.kind === "sell" ? "Кассовый чек, приход" : "Кассовый чек, возврат прихода"}</b>
+            <span className={`tag ${RECEIPT_STATUS[receipt.status][1]}`}>{RECEIPT_STATUS[receipt.status][0]}</span>
+          </div>
+          {receipt.items.map((item, index) => (
+            <div key={index} className="spread" style={{ fontSize: 12 }}><span className="muted">{item.name}{item.paymentMethod === "advance" ? " (аванс)" : ""}</span><span>{formatMoney(item.sumMinor)}</span></div>
+          ))}
+          {receipt.payments.map((item, index) => (
+            <div key={index} className="spread" style={{ fontSize: 12 }}><span className="muted">{RECEIPT_PAYMENT[item.type] ?? item.type}</span><span>{formatMoney(item.sumMinor)}</span></div>
+          ))}
+          {receipt.status === "done" && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              ФН {receipt.fnNumber} · ФД {receipt.fdNumber} · ФП {receipt.fiscalSign}
+              {receipt.provider === "test" ? " · тестовая касса" : ""}
+            </span>
+          )}
+          {receipt.error && <span className="muted" style={{ fontSize: 12, color: "var(--bad, #b42318)" }}>{receipt.error}</span>}
+          {receipt.status === "failed" && (
+            <button
+              type="button"
+              className="btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={async () => {
+                try {
+                  await api(`/api/fiscal/receipts/${receipt.id}/retry`, { method: "POST" });
+                  toast("Чек отправлен повторно");
+                  setTimeout(() => { load(); onChanged(); }, 800);
+                } catch (error) {
+                  toast((error as ApiError).message, "error");
+                }
+              }}
+            >
+              Повторить чек
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export const METHOD_LABEL: Record<string, string> = {
   cash: "Наличные",
@@ -70,6 +156,7 @@ export function PaymentRow({ payment, onChanged, compact = false }: { payment: P
     payment.status === "refunded" ? <span className="tag tag-warn">возвращён</span> :
     payment.refundedMinor > 0 ? <span className="tag tag-warn">возврат {formatMoney(payment.refundedMinor)}</span> :
     null;
+  const receipt = mainReceipt(payment);
   return (
     <div className={`pay-row ${payment.status === "void" ? "is-void" : ""}`}>
       <button type="button" className="pay-main" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
@@ -83,6 +170,7 @@ export function PaymentRow({ payment, onChanged, compact = false }: { payment: P
           </span>
         </span>
         {tag}
+        {receipt && payment.status !== "void" && <span className={`tag receipt-chip ${RECEIPT_STATUS[receipt.status]?.[1] ?? ""}`}>{RECEIPT_STATUS[receipt.status]?.[0]}</span>}
         <b className={`pay-sum ${out ? "out" : ""}`}>{out ? "−" : ""}{formatMoney(payment.totalMinor)}</b>
       </button>
       {open && (
@@ -96,7 +184,8 @@ export function PaymentRow({ payment, onChanged, compact = false }: { payment: P
           {payment.changeMinor > 0 && <div className="spread"><span className="muted">Сдача</span><span>{formatMoney(payment.changeMinor)}</span></div>}
           {payment.refundReason && <div className="muted">Причина возврата: {payment.refundReason}</div>}
           {payment.voidReason && <div className="muted">Аннулирован: {payment.voidReason}</div>}
-          <div className="muted">Провёл: {payment.createdByName}</div>
+          <div className="muted">Провёл: {payment.createdByName}{!payment.shiftId && payment.direction === "in" ? " · онлайн-оплата, вне смены" : ""}</div>
+          {(payment.receipts?.length ?? 0) > 0 && <ReceiptBlock paymentId={payment.id} onChanged={onChanged} />}
           {(payment.canRefund || payment.canVoid) && (
             <div className="row" style={{ marginTop: 6 }}>
               {payment.canRefund && <button type="button" className="btn" onClick={() => setMode("refund")}>Возврат</button>}

@@ -47,9 +47,10 @@ await client.query("DELETE FROM tenants WHERE id = $1", [tenant]);
 await client.query("DELETE FROM users WHERE email LIKE '%@ambeauty.local'");
 await client.query("INSERT INTO tenants (id, name, slug) VALUES ($1, 'Am Beauty', 'am-beauty')", [tenant]);
 await client.query(
-  `INSERT INTO branches (id, tenant_id, name, address, timezone, require_payment_on_complete, slug)
-   VALUES ($1, $3, 'Am Beauty · Садовая', 'Садовая, 14', 'Europe/Moscow', true, 'sadovaya'),
-          ($2, $3, 'Am Beauty · Патриаршие', 'Патриаршие пруды', 'Europe/Moscow', true, 'patriarshie')`,
+  `INSERT INTO branches (id, tenant_id, name, address, timezone, require_payment_on_complete, slug,
+     fiscal_enabled, fiscal_inn, fiscal_place, acquiring_enabled)
+   VALUES ($1, $3, 'Am Beauty · Садовая', 'Садовая, 14', 'Europe/Moscow', true, 'sadovaya', true, '770123456789', 'г. Москва, ул. Садовая, 14', true),
+          ($2, $3, 'Am Beauty · Патриаршие', 'Патриаршие пруды', 'Europe/Moscow', true, 'patriarshie', false, '', '', false)`,
   [branch, branch2, tenant],
 );
 await client.query(

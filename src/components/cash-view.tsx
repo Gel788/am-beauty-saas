@@ -67,7 +67,8 @@ function Signed({ minor }: { minor: number }) {
 export function CashView() {
   const toast = useToast();
   const [me, setMe] = useState<Me | null>(null);
-  const [tab, setTab] = useState<"shift" | "history">("shift");
+  const [tab, setTab] = useState<"shift" | "history" | "receipts">("shift");
+  const [failedReceipts, setFailedReceipts] = useState(0);
   const [shift, setShift] = useState<Shift | null>(null);
   const [payments, setPayments] = useState<PaymentItem[]>([]);
   const [history, setHistory] = useState<Shift[]>([]);
@@ -86,6 +87,8 @@ export function CashView() {
       setShift(current);
       setPayments(current ? await api<PaymentItem[]>(`/api/payments?branchId=${id}&shiftId=${current.id}`) : []);
       setHistory(await api<Shift[]>(`/api/shifts?branchId=${id}&limit=30`));
+      const failed = await api<{ id: string }[]>(`/api/fiscal/receipts?branchId=${id}&status=failed`).catch(() => []);
+      setFailedReceipts(failed.length);
       setError("");
     } catch (err) {
       setError((err as ApiError).message);
@@ -115,12 +118,21 @@ export function CashView() {
           <div className="segment">
             <button type="button" className={tab === "shift" ? "on" : ""} onClick={() => setTab("shift")}>Текущая смена</button>
             <button type="button" className={tab === "history" ? "on" : ""} onClick={() => setTab("history")}>История смен</button>
+            <button type="button" className={tab === "receipts" ? "on" : ""} onClick={() => setTab("receipts")}>
+              Чеки{failedReceipts > 0 ? ` · ${failedReceipts} с ошибкой` : ""}
+            </button>
           </div>
           {shift?.status === "open" && <button className="btn" type="button" onClick={() => setIncome(true)}>+ Приход</button>}
         </div>
       </div>
       {error && <div className="banner">{error}</div>}
+      {failedReceipts > 0 && tab !== "receipts" && (
+        <div className="banner">
+          {failedReceipts} чек(а) не удалось пробить. <button type="button" className="btn-ghost" onClick={() => setTab("receipts")}>Посмотреть</button>
+        </div>
+      )}
       {loading && <div className="skeleton" />}
+      {!loading && tab === "receipts" && branch && <ReceiptsTab branchId={branch.id} onChanged={load} />}
 
       {!loading && tab === "shift" && !shift && branch && <OpenShift branchId={branch.id} last={history.find((item) => item.status === "closed") ?? null} onOpened={load} />}
       {!loading && tab === "shift" && shift?.status === "open" && (
@@ -646,5 +658,86 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
         </div>
       </div>
     </Modal>
+  );
+}
+
+type ReceiptRowData = {
+  id: string;
+  paymentId: string;
+  kind: "sell" | "sell_refund";
+  status: "pending" | "sent" | "done" | "failed" | "canceled";
+  provider: string;
+  totalMinor: number;
+  fdNumber: string | null;
+  fiscalSign: string | null;
+  error: string | null;
+  attempts: number;
+  createdAt: string;
+  items: { name: string }[];
+  customer: { phone?: string; email?: string };
+};
+const RECEIPT_LABEL: Record<ReceiptRowData["status"], [string, string]> = {
+  pending: ["в очереди", "tag-muted"],
+  sent: ["отправлен", "tag-muted"],
+  done: ["пробит", "tag-ok"],
+  failed: ["ошибка", "tag-bad"],
+  canceled: ["отменён", "tag-muted"],
+};
+
+/** FISC-LIST-01: every receipt of the branch, problems first. */
+function ReceiptsTab({ branchId, onChanged }: { branchId: string; onChanged: () => void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<ReceiptRowData[] | null>(null);
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const load = useCallback(() => {
+    api<ReceiptRowData[]>(`/api/fiscal/receipts?branchId=${branchId}${onlyProblems ? "&status=problem" : ""}`)
+      .then(setRows)
+      .catch((err: ApiError) => toast(err.message, "error"));
+  }, [branchId, onlyProblems, toast]);
+  useEffect(load, [load]);
+  return (
+    <div className="panel list">
+      <div className="spread">
+        <h2 style={{ margin: 0 }}>Кассовые чеки</h2>
+        <label className="row" style={{ fontSize: 13 }}><input type="checkbox" checked={onlyProblems} onChange={(event) => setOnlyProblems(event.target.checked)} /> Только не пробитые</label>
+      </div>
+      {!rows && <div className="skeleton" />}
+      {rows?.length === 0 && <div className="empty">Чеков нет. Включите их в настройках: «Чеки и онлайн-оплата».</div>}
+      {rows?.map((row) => (
+        <div key={row.id} className="spread" style={{ gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)", alignItems: "flex-start" }}>
+          <div className="list" style={{ gap: 2, minWidth: 0 }}>
+            <b style={{ fontSize: 14 }}>{row.kind === "sell" ? "Приход" : "Возврат прихода"} · {formatMoney(row.totalMinor)}</b>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {new Date(row.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              {" · "}
+              {row.items.map((item) => item.name).join(", ")}
+              {row.customer.phone ? ` · ${row.customer.phone}` : ""}
+            </span>
+            {row.status === "done" && <span className="muted" style={{ fontSize: 12 }}>ФД {row.fdNumber} · ФП {row.fiscalSign}{row.provider === "test" ? " · тестовая касса" : ""}</span>}
+            {row.error && <span style={{ fontSize: 12, color: "#b42318" }}>{row.error} (попыток: {row.attempts})</span>}
+          </div>
+          <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+            <span className={`tag ${RECEIPT_LABEL[row.status][1]}`}>{RECEIPT_LABEL[row.status][0]}</span>
+            {row.status === "failed" && (
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  try {
+                    await api(`/api/fiscal/receipts/${row.id}/retry`, { method: "POST" });
+                    toast("Чек отправлен повторно");
+                    setTimeout(() => { load(); onChanged(); }, 800);
+                  } catch (err) {
+                    toast((err as ApiError).message, "error");
+                  }
+                }}
+              >
+                Повторить
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

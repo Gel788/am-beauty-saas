@@ -37,6 +37,18 @@ import {
   updateStaff,
 } from "@/server/catalog";
 import { createPayment, openShift } from "@/server/payments";
+import { listReceipts, retryReceipt, runFiscalForTenant, runFiscalJob, fiscalProviders } from "@/server/fiscal";
+import {
+  acquiringProviders,
+  asAcquiring,
+  cancelPayLink,
+  createPayLink,
+  handleWebhook,
+  listPayLinks,
+  publicPayInfo,
+  resolvePayToken,
+  sandboxPay,
+} from "@/server/acquiring";
 import {
   appointmentPayments,
   cancelClosing,
@@ -163,6 +175,17 @@ function cookie(response: NextResponse, token: string) {
   return response;
 }
 
+/** Registers receipts right after the payment's transaction commits; cron retries whatever this misses. */
+function kickFiscal(tenantId: string) {
+  void runFiscalForTenant(tenantId).catch((error) => console.error("fiscal", error));
+}
+
+function originOf(request: NextRequest) {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host;
+  const proto = request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(":", "");
+  return `${proto}://${host}`;
+}
+
 async function readJson(request: NextRequest) {
   const text = await request.text();
   if (!text) return {};
@@ -216,6 +239,20 @@ async function handle(request: NextRequest, parts: string[]) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
     }
     return NextResponse.json(await runReminderJob());
+  }
+
+  if (key === "POST jobs/fiscal") {
+    const expected = process.env.JOBS_TOKEN;
+    if (!expected || request.headers.get("x-jobs-token") !== expected) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    }
+    return NextResponse.json(await runFiscalJob());
+  }
+  if (method === "POST" && parts[0] === "webhooks" && parts[1] === "acquiring" && parts[2]) {
+    // The provider adapter verifies the signature; settlement then kicks the receipt.
+    const result = await handleWebhook(parts[2], await readJson(request), request.headers);
+    void runFiscalJob().catch((error) => console.error("fiscal", error));
+    return NextResponse.json(result);
   }
 
   const actor = await actorFromToken(request.cookies.get("ab_session")?.value);
@@ -634,18 +671,60 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (parts[0] === "payments" && parts[1] && parts[2] === "refund" && method === "POST") {
     const body = await readJson(request);
-    return NextResponse.json(await run((ctx) => refundPayment(ctx, parts[1], body as never)));
+    const result = await run((ctx) => refundPayment(ctx, parts[1], body as never));
+    kickFiscal(actor.tenantId);
+    return NextResponse.json(result);
   }
   if (parts[0] === "payments" && parts[1] && parts[2] === "void" && method === "POST") {
     const body = await readJson(request);
-    return NextResponse.json(await run((ctx) => voidPayment(ctx, parts[1], body as never)));
+    const result = await run((ctx) => voidPayment(ctx, parts[1], body as never));
+    kickFiscal(actor.tenantId);
+    return NextResponse.json(result);
   }
   if (parts[0] === "appointments" && parts[1] && parts[2] === "payments" && method === "GET") {
     return NextResponse.json(await run((ctx) => appointmentPayments(ctx, parts[1])));
   }
+  if (key === "GET fiscal/providers") return NextResponse.json({ fiscal: fiscalProviders(), acquiring: acquiringProviders() });
+  if (key === "GET fiscal/receipts") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(
+      await run((ctx) =>
+        listReceipts(ctx, branchId, {
+          status: url.searchParams.get("status") ?? undefined,
+          paymentId: url.searchParams.get("paymentId") ?? undefined,
+        }),
+      ),
+    );
+  }
+  if (parts[0] === "fiscal" && parts[1] === "receipts" && parts[2] && parts[3] === "retry" && method === "POST") {
+    const result = await run((ctx) => retryReceipt(ctx, parts[2]));
+    kickFiscal(actor.tenantId);
+    return NextResponse.json(result);
+  }
+  if (parts[0] === "appointments" && parts[1] && parts[2] === "pay-links") {
+    if (method === "GET") return NextResponse.json(await run((ctx) => listPayLinks(ctx, parts[1])));
+    if (method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await run((ctx) =>
+          createPayLink(ctx, parts[1], {
+            amountMinor: body.amountMinor === undefined ? undefined : Number(body.amountMinor),
+            purpose: body.purpose === "deposit" || body.purpose === "visit" ? body.purpose : undefined,
+            origin: originOf(request),
+          }),
+        ),
+      );
+    }
+  }
+  if (parts[0] === "pay-links" && parts[1] && parts[2] === "cancel" && method === "POST") {
+    return NextResponse.json(await run((ctx) => cancelPayLink(ctx, parts[1])));
+  }
   if (key === "POST payments") {
-    const body = await readJson(request);
-    return NextResponse.json(await run((ctx) => createPayment(ctx, body as never)));
+    const { online: _online, ...body } = await readJson(request);
+    void _online; // only the acquiring webhook posts outside the shift
+    const result = await run((ctx) => createPayment(ctx, body as never));
+    kickFiscal(actor.tenantId);
+    return NextResponse.json(result);
   }
 
   return NextResponse.json({ error: { code: "NOT_FOUND", message: "Не найдено" } }, { status: 404 });
@@ -667,6 +746,17 @@ async function handlePublic(request: NextRequest, parts: string[]) {
       return NextResponse.json(
         await asOnline(tenantId, (ctx) => cancelBooking(ctx, appointmentId, { reason: body.reason ? String(body.reason) : undefined })),
       );
+    }
+  }
+  if (parts[0] === "pay" && parts[1]) {
+    const { tenantId, id } = await resolvePayToken(parts[1]);
+    if (method === "GET" && !parts[2]) return NextResponse.json(await asAcquiring(tenantId, (ctx) => publicPayInfo(ctx, id)));
+    if (method === "POST" && parts[2] === "sandbox") {
+      const body = await readJson(request);
+      const action = body.action === "sbp" ? "sbp" : body.action === "cancel" ? "cancel" : "card";
+      const result = await asAcquiring(tenantId, (ctx) => sandboxPay(ctx, id, action));
+      kickFiscal(tenantId);
+      return NextResponse.json(result);
     }
   }
   if (parts[0] === "b" && parts[1] && parts[2]) {

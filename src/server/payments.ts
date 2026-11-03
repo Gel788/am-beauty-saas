@@ -4,6 +4,7 @@ import { isAdminPlus, loadBranch } from "./access";
 import { one } from "./db";
 import type { Ctx } from "./types";
 import { afterPaymentPosted, productLines } from "./inventory";
+import { enqueueReceipt } from "./fiscal";
 import {
   afterPaymentPosted as loyaltyAfterPosted,
   certificateSaleLines,
@@ -191,6 +192,8 @@ export async function createPayment(
     items?: { itemId: string; qty: unknown; priceMinor?: number }[];
     /** LOY-SUB-01: membership plan sold (kind membership). */
     planId?: string;
+    /** ACQ-*: paid through the acquiring provider; the money is in the bank, not in the shift's drawer. */
+    online?: boolean;
   },
 ): Promise<PaymentResult> {
   const kind = input.kind ?? (input.appointmentId ? "visit" : "misc");
@@ -210,7 +213,7 @@ export async function createPayment(
   const handed = (input.tenders ?? []).reduce((sum, tender) => sum + tender.amountMinor, 0);
   if (handed <= 0) throw new AppError("VALIDATION", "Укажите сумму оплаты");
 
-  const { shiftId } = await requireShift(ctx, input.branchId, input.bypassShift);
+  const { shiftId } = input.online ? { shiftId: null } : await requireShift(ctx, input.branchId, input.bypassShift);
   const tipMinor = input.tipMinor ?? 0;
   assertMoney(tipMinor, "Чаевые");
 
@@ -540,6 +543,7 @@ export async function insertPayment(
   }
   await afterPaymentPosted(ctx, id);
   await loyaltyAfterPosted(ctx, id);
+  await enqueueReceipt(ctx, id);
   if (direction === "in") {
     await audit(ctx, {
       branchId: input.branchId,

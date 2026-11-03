@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatMoney, rublesToMinor } from "@/domain/money";
 import { formatPhone } from "@/domain/phone";
 import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
 import { zonedDateTimeToUtc } from "@/domain/time";
 import { api, type ApiError } from "./api";
 import { PaymentRow, type PaymentItem } from "./payment-actions";
+import { PayLinkBlock } from "./pay-link";
 import { Modal, useToast } from "./ui";
 
 type Line = { serviceId: string; title: string; durationMin: number; priceMinor: number };
@@ -155,6 +156,11 @@ export function RecordDrawer({
     () => services.filter((service) => service.active && service.staffIds.includes(staffId)),
     [services, staffId],
   );
+
+  const paidOnline = useCallback(() => {
+    setReloadKey((key) => key + 1);
+    onRefresh?.();
+  }, [onRefresh]);
 
   function askClose() {
     if (dirty) setConfirmClose(true);
@@ -491,6 +497,7 @@ export function RecordDrawer({
                 )}
                 {!loyaltyPay && <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>}
                 <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>Провести</button>
+                {seed.id && <PayLinkBlock appointmentId={seed.id} dueMinor={Math.max(0, price - paidMinor)} onPaid={paidOnline} />}
               </>
             )}
             {ledger.length > 0 && (

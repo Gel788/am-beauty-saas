@@ -33,6 +33,15 @@ type Branch = {
   reminderHours: number;
   consumePolicy: "warn" | "block";
   allowNegativeStock: boolean;
+  fiscalEnabled: boolean;
+  fiscalProvider: string;
+  fiscalInn: string;
+  fiscalTaxation: string;
+  fiscalVat: string;
+  fiscalPlace: string;
+  acquiringEnabled: boolean;
+  acquiringProvider: string;
+  acquiringLinkHours: number;
 };
 
 export function SettingsView() {
@@ -73,6 +82,7 @@ export function SettingsView() {
         <div className="field"><label>Неявка после, минут</label><input type="number" value={branch.noShowGraceMin} onChange={(event) => set("noShowGraceMin", Number(event.target.value))} /></div>
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
+      <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
       <ReminderSettings branch={branch} onSaved={setBranch} />
       <StockSettings branch={branch} onSaved={setBranch} />
@@ -148,6 +158,107 @@ function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (
       <div className="field"><label>Будущих онлайн-записей на один телефон</label><input type="number" min={1} value={draft.onlineMaxActivePerPhone} onChange={(event) => set("onlineMaxActivePerPhone", Number(event.target.value))} /></div>
       <div className="field"><label>Цвет страницы записи</label><input type="color" style={{ width: 64, height: 36, padding: 2 }} value={draft.onlineAccent} onChange={(event) => set("onlineAccent", event.target.value)} /></div>
       <button className="btn-gradient" type="submit">Сохранить онлайн-запись</button>
+    </form>
+  );
+}
+
+type Provider = { name: string; label: string };
+const TAXATION: [string, string][] = [
+  ["usn_income", "УСН «доходы»"],
+  ["usn_income_outcome", "УСН «доходы минус расходы»"],
+  ["patent", "Патент"],
+  ["osn", "ОСН"],
+  ["esn", "ЕСХН"],
+];
+const VAT: [string, string][] = [
+  ["none", "Без НДС"],
+  ["vat0", "0 %"],
+  ["vat5", "5 %"],
+  ["vat7", "7 %"],
+  ["vat10", "10 %"],
+  ["vat20", "20 %"],
+];
+
+function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
+  const toast = useToast();
+  const [draft, setDraft] = useState(branch);
+  const [providers, setProviders] = useState<{ fiscal: Provider[]; acquiring: Provider[] }>({ fiscal: [], acquiring: [] });
+  useEffect(() => setDraft(branch), [branch]);
+  useEffect(() => {
+    api<{ fiscal: Provider[]; acquiring: Provider[] }>("/api/fiscal/providers").then(setProviders).catch(() => undefined);
+  }, []);
+  const set = <K extends keyof Branch>(key: K, value: Branch[K]) => setDraft({ ...draft, [key]: value });
+  const sandbox = draft.fiscalProvider === "test" || draft.acquiringProvider === "test";
+  return (
+    <form
+      className="panel list"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        try {
+          const saved = await api<Branch>(`/api/branches/${branch.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              fiscalEnabled: draft.fiscalEnabled,
+              fiscalProvider: draft.fiscalProvider,
+              fiscalInn: draft.fiscalInn,
+              fiscalTaxation: draft.fiscalTaxation,
+              fiscalVat: draft.fiscalVat,
+              fiscalPlace: draft.fiscalPlace,
+              acquiringEnabled: draft.acquiringEnabled,
+              acquiringProvider: draft.acquiringProvider,
+              acquiringLinkHours: draft.acquiringLinkHours,
+            }),
+          });
+          onSaved(saved);
+          toast("Касса и онлайн-оплата сохранены");
+        } catch (error) {
+          toast((error as ApiError).message, "error");
+        }
+      }}
+    >
+      <h2 style={{ margin: 0 }}>Чеки и онлайн-оплата</h2>
+      <span className="muted" style={{ fontSize: 13 }}>
+        Каждая оплата и возврат превращаются в кассовый чек по 54-ФЗ и уходят в онлайн-кассу. Чаевые в чек не попадают, бонусы уменьшают цену, сертификат и абонемент идут как зачёт предоплаты. Меняет владелец.
+      </span>
+      {sandbox && (
+        <div className="tag tag-warn" style={{ alignSelf: "flex-start", whiteSpace: "normal" }}>
+          Подключён тестовый режим: чеки не уходят в ФНС, деньги не списываются. Боевой провайдер подключается, когда будут договор и ключи.
+        </div>
+      )}
+      <label className="row"><input type="checkbox" checked={draft.fiscalEnabled} onChange={(event) => set("fiscalEnabled", event.target.checked)} /> Пробивать чеки</label>
+      <div className="form-grid">
+        <div className="field">
+          <label>Онлайн-касса</label>
+          <select value={draft.fiscalProvider} onChange={(event) => set("fiscalProvider", event.target.value)}>
+            {providers.fiscal.map((provider) => <option key={provider.name} value={provider.name}>{provider.label}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>ИНН</label><input inputMode="numeric" placeholder="10 или 12 цифр" value={draft.fiscalInn} onChange={(event) => set("fiscalInn", event.target.value)} /></div>
+        <div className="field">
+          <label>Налогообложение</label>
+          <select value={draft.fiscalTaxation} onChange={(event) => set("fiscalTaxation", event.target.value)}>
+            {TAXATION.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>НДС</label>
+          <select value={draft.fiscalVat} onChange={(event) => set("fiscalVat", event.target.value)}>
+            {VAT.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="field"><label>Адрес расчётов (печатается в чеке)</label><input placeholder="г. Москва, ул. Садовая, 1" value={draft.fiscalPlace} onChange={(event) => set("fiscalPlace", event.target.value)} /></div>
+      <label className="row"><input type="checkbox" checked={draft.acquiringEnabled} onChange={(event) => set("acquiringEnabled", event.target.checked)} /> Принимать оплату по ссылке: карта и СБП</label>
+      <div className="form-grid">
+        <div className="field">
+          <label>Провайдер оплаты</label>
+          <select value={draft.acquiringProvider} onChange={(event) => set("acquiringProvider", event.target.value)}>
+            {providers.acquiring.map((provider) => <option key={provider.name} value={provider.name}>{provider.label}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Ссылка действует, часов</label><input type="number" min={1} max={168} value={draft.acquiringLinkHours} onChange={(event) => set("acquiringLinkHours", Number(event.target.value))} /></div>
+      </div>
+      <button className="btn-gradient" type="submit">Сохранить кассу</button>
     </form>
   );
 }

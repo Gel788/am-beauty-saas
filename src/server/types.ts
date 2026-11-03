@@ -57,6 +57,15 @@ export type BranchRow = {
   accrue_on_complete_unpaid: boolean;
   consume_policy: "warn" | "block";
   allow_negative_stock: boolean;
+  fiscal_enabled: boolean;
+  fiscal_provider: string;
+  fiscal_inn: string;
+  fiscal_taxation: string;
+  fiscal_vat: string;
+  fiscal_place: string;
+  acquiring_enabled: boolean;
+  acquiring_provider: string;
+  acquiring_link_hours: number;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

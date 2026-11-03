@@ -9,6 +9,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/staff/") ||
     pathname.startsWith("/b/") ||
     pathname.startsWith("/booking/") ||
+    pathname.startsWith("/pay/") ||
     /\.(?:png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(pathname)
   ) {
     return NextResponse.next();
