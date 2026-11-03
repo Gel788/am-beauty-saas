@@ -48,9 +48,10 @@ export async function dashboard(ctx: Ctx, branchId: string) {
   if (ctx.actor.role !== "accountant" && ctx.actor.role !== "client") {
     journal = await getJournal(ctx, { branchId, date: today });
   }
-  const repeat = await one<{ s: number }>(
+  const repeat = await one<{ s: number; repeats: number }>(
     ctx.db,
-    `SELECT COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE n > 1) / NULLIF(COUNT(*), 0)), 0)::int AS s
+    `SELECT COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE n > 1) / NULLIF(COUNT(*), 0)), 0)::int AS s,
+            COALESCE(COUNT(*) FILTER (WHERE n > 1), 0)::int AS repeats
      FROM (
        SELECT client_id, COUNT(*) AS n
        FROM appointments
@@ -78,6 +79,38 @@ export async function dashboard(ctx: Ctx, branchId: string) {
        AND posted_at >= $2 AND posted_at < $3`,
     [branchId, range.start.toISOString(), monthEnd.toISOString()],
   );
+  const prevMonthStart = `${addCalendarDays(monthStart, -1).slice(0, 8)}01`;
+  const prevRange = localDayUtcRange(prevMonthStart, branch.timezone);
+  const prevRevenue = await one<{ s: number }>(
+    ctx.db,
+    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+     FROM payment_lines pl
+     JOIN payments p ON p.id = pl.payment_id
+     WHERE p.branch_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+       AND pl.line_type IN ('service', 'deposit')
+       AND p.posted_at >= $2 AND p.posted_at < $3`,
+    [branchId, prevRange.start.toISOString(), range.start.toISOString()],
+  );
+  const noShow = await one<{ recent_ns: number; recent_den: number; prev_ns: number; prev_den: number }>(
+    ctx.db,
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'no_show' AND starts_at >= $2 AND starts_at < $3)::int AS recent_ns,
+       COUNT(*) FILTER (WHERE status IN ('completed', 'no_show') AND starts_at >= $2 AND starts_at < $3)::int AS recent_den,
+       COUNT(*) FILTER (WHERE status = 'no_show' AND starts_at >= $4 AND starts_at < $2)::int AS prev_ns,
+       COUNT(*) FILTER (WHERE status IN ('completed', 'no_show') AND starts_at >= $4 AND starts_at < $2)::int AS prev_den
+     FROM appointments
+     WHERE branch_id = $1`,
+    [
+      branchId,
+      new Date(ctx.now.getTime() - 30 * 86400000).toISOString(),
+      ctx.now.toISOString(),
+      new Date(ctx.now.getTime() - 60 * 86400000).toISOString(),
+    ],
+  );
+  const recentDen = Number(noShow?.recent_den ?? 0);
+  const prevDen = Number(noShow?.prev_den ?? 0);
+  const recentRate = recentDen > 0 ? (Number(noShow?.recent_ns ?? 0) / recentDen) * 100 : 0;
+  const prevRate = prevDen > 0 ? (Number(noShow?.prev_ns ?? 0) / prevDen) * 100 : recentRate;
   const todayPaid = await one<{ s: number }>(
     ctx.db,
     `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
@@ -91,9 +124,13 @@ export async function dashboard(ctx: Ctx, branchId: string) {
     today,
     branchName: branch.name,
     monthRevenueMinor: Number(revenue?.s ?? 0),
+    prevMonthRevenueMinor: Number(prevRevenue?.s ?? 0),
     todayPaidMinor: Number(todayPaid?.s ?? 0),
     repeatPercent: Number(repeat?.s ?? 0),
+    repeatClients: Number(repeat?.repeats ?? 0),
     dormantClients: Number(dormant?.s ?? 0),
+    noShowPercent: Math.round(recentRate * 10) / 10,
+    noShowDeltaPp: Math.round((recentRate - prevRate) * 10) / 10,
     averageCheckMinor: Number(checks?.n ?? 0) > 0 ? Math.round(Number(checks?.total ?? 0) / Number(checks?.n)) : 0,
     series: series.map((row) => ({ day: row.day, totalMinor: Number(row.total) })),
     topServices: top.map((row) => ({ title: row.title, totalMinor: Number(row.total), visits: Number(row.visits) })),
@@ -103,7 +140,16 @@ export async function dashboard(ctx: Ctx, branchId: string) {
           appointmentCount: journal.stats.appointmentCount,
           loadPercent: journal.stats.loadPercent,
           newClients: journal.stats.newClients,
-          staff: journal.staff.map((staff) => ({ id: staff.id, name: staff.name, color: staff.color, loadPercent: staff.loadPercent })),
+          onlineCount: journal.stats.onlineCount,
+          staff: journal.staff.map((staff) => ({
+            id: staff.id,
+            name: staff.name,
+            color: staff.color,
+            loadPercent: staff.loadPercent,
+            revenueMinor: journal.appointments
+              .filter((appt) => appt.staffId === staff.id && appt.status !== "cancelled")
+              .reduce((sum, appt) => sum + appt.priceMinor, 0),
+          })),
         }
       : null,
   };

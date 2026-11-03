@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, Search, Sparkles, UserRound } from "lucide-react";
-import { formatMoney } from "@/domain/money";
+import { ChevronLeft, ChevronRight, Gauge, Plus, Search, Sparkles, UserPlus, Wallet } from "lucide-react";
 import type { AppointmentStatus } from "@/domain/status";
 import { addCalendarDays, todayInZone, weekdayLabel, zonedDateTimeToUtc } from "@/domain/time";
 import { hitTestColumn, pointerIntent, resolveDrop } from "@/domain/grid";
@@ -168,10 +167,18 @@ export function JournalBoard() {
     });
   }, [journal]);
   const [trackH, setTrackH] = useState(0);
+  const [viewportH, setViewportH] = useState(900);
+  useEffect(() => {
+    const sync = () => setViewportH(window.innerHeight);
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
   const dayStart = journal?.dayStartMin ?? 600;
   const dayEnd = journal?.dayEndMin ?? 1200;
   const span = Math.max(30, dayEnd - dayStart);
-  const px = trackH > 0 ? trackH / span : journal?.density === "compact" ? 0.9 : 1.15;
+  const hourPx = viewportH >= 880 || trackH <= 0 ? 70 : Math.min(70, trackH / (span / 60));
+  const px = hourPx / 60;
 
   async function commitDrag(current: Drag) {
     const decision = resolveDrop({ outside: current.outside, staffId: current.previewStaff, hardInvalid: current.invalid });
@@ -282,17 +289,38 @@ export function JournalBoard() {
     window.addEventListener("pointerup", up);
   }
 
-  const hours: number[] = [];
-  const step = journal?.branch.gridLabelMin ?? 60;
-  for (let minute = dayStart; minute <= dayEnd; minute += step) hours.push(minute);
+const TONE: Record<string, { card: string; title: string; sub: string; ring: boolean }> = {
+  "Алина Ковалёва": { card: "border-rose-400 bg-gradient-to-br from-rose-100 to-pink-50", title: "text-rose-950", sub: "text-rose-700/70", ring: true },
+  "Марина Соколова": { card: "border-amber-400 bg-gradient-to-br from-amber-100 to-orange-50", title: "text-amber-950", sub: "text-amber-800/70", ring: false },
+  "Денис Волков": { card: "border-sky-400 bg-gradient-to-br from-sky-100 to-indigo-50", title: "text-sky-950", sub: "text-sky-800/70", ring: false },
+  "Елена Лебедева": { card: "border-emerald-400 bg-gradient-to-br from-emerald-100 to-teal-50", title: "text-emerald-950", sub: "text-emerald-800/70", ring: false },
+};
+
+function rub(minor: number): string {
+  const value = minor / 100;
+  const digits = Number.isInteger(value) ? 0 : 2;
+  const formatted = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+  return `${formatted.replace(/\u00A0/g, " ")} ₽`;
+}
+
+function ruRecords(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word = mod10 === 1 && mod100 !== 11 ? "запись" : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "записи" : "записей";
+  return `${count} ${word}`;
+}
+
+function toneFor(name: string) {
+  return TONE[name] ?? TONE["Алина Ковалёва"];
+}
+
+  const marks: number[] = [];
+  for (let minute = Math.ceil(dayStart / 60) * 60; minute <= dayEnd; minute += 60) marks.push(minute);
 
   useEffect(() => {
     const root = columnsRef.current;
     if (!root) return;
-    const measure = () => {
-      const col = root.querySelector(".day-col");
-      if (col) setTrackH(col.getBoundingClientRect().height);
-    };
+    const measure = () => setTrackH(root.getBoundingClientRect().height);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(root);
@@ -306,32 +334,34 @@ export function JournalBoard() {
     return hour * 60 + minute;
   })();
   const showNow = date === todayInZone(timezone) && nowMin >= dayStart && nowMin <= dayEnd;
+  const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 
   return (
-    <>
-      <div className="journal-top">
-        <div className="journal-title">
-          <div className="page-kicker">{date === todayInZone(timezone) ? "Сегодня" : "День"} · {journal?.stats.appointmentCount ?? 0} записей</div>
-          <div className="date-title">
-            <h1>{date ? weekdayLabel(date, timezone) : "Журнал"}</h1>
-            <button className="chev" type="button" aria-label="Предыдущий день" onClick={() => go(addCalendarDays(date, -1))}><ChevronLeft size={16} /></button>
-            <button className="chev" type="button" aria-label="Следующий день" onClick={() => go(addCalendarDays(date, 1))}><ChevronRight size={16} /></button>
-            <label className="chev" aria-label="Дата">
-              <span className="sr">Дата</span>
-              <input className="sr" type="date" value={date} onChange={(event) => go(event.target.value)} />
-              <CalendarDays size={14} />
+    <div className="glass rounded-[28px] flex-1 flex flex-col overflow-hidden min-h-0">
+      <header className="flex items-center px-6 pt-5 gap-3 shrink-0">
+        <div className="min-w-0">
+          <div className="text-[12px] text-muted font-medium whitespace-nowrap">{date === todayInZone(timezone) ? "Сегодня" : "День"} · {journal?.stats.appointmentCount ?? 0} записей</div>
+          <div className="flex items-end gap-1">
+            <h1 className="journal-date font-display text-[24px] font-semibold leading-tight mt-0.5 whitespace-nowrap">{date ? weekdayLabel(date, timezone) : "Журнал"}</h1>
+            <label className="sr">
+              Дата
+              <input type="date" value={date} onChange={(event) => go(event.target.value)} />
             </label>
           </div>
         </div>
-        <div className="journal-toolbar">
-          <div className="segment">
-            <button className={view === "day" ? "on" : ""} onClick={() => setView("day")} type="button">День</button>
-            <button className={view === "week" ? "on" : ""} onClick={() => setView("week")} type="button">Неделя</button>
-            <button className={view === "month" ? "on" : ""} onClick={() => setView("month")} type="button">Месяц</button>
+        <div className="flex gap-1 ml-2 self-end mb-1 shrink-0">
+          <button className="w-8 h-8 rounded-lg solid grid place-items-center text-muted" type="button" aria-label="Предыдущий день" onClick={() => go(addCalendarDays(date, -1))}><ChevronLeft className="w-4 h-4" strokeWidth={1.8} /></button>
+          <button className="w-8 h-8 rounded-lg solid grid place-items-center text-muted" type="button" aria-label="Следующий день" onClick={() => go(addCalendarDays(date, 1))}><ChevronRight className="w-4 h-4" strokeWidth={1.8} /></button>
+        </div>
+        <div className="ml-auto flex items-center gap-3 shrink-0">
+          <div className="flex p-1 rounded-xl bg-ink/[.05] text-[13px]">
+            <button className={view === "day" ? "px-3 py-1.5 rounded-lg bg-white shadow-sm font-semibold" : "px-3 py-1.5 text-muted"} onClick={() => setView("day")} type="button">День</button>
+            <button className={view === "week" ? "px-3 py-1.5 rounded-lg bg-white shadow-sm font-semibold" : "px-3 py-1.5 text-muted"} onClick={() => setView("week")} type="button">Неделя</button>
+            <button className={view === "month" ? "px-3 py-1.5 rounded-lg bg-white shadow-sm font-semibold" : "px-3 py-1.5 text-muted"} onClick={() => setView("month")} type="button">Месяц</button>
           </div>
-          <div style={{ position: "relative" }}>
-            <button className="icon-circle" type="button" aria-label="Поиск записей" onClick={() => { setSearchOpen((value) => !value); window.setTimeout(() => searchRef.current?.focus(), 0); }}>
-              <Search size={16} />
+          <div className="relative">
+            <button className="w-10 h-10 rounded-xl solid grid place-items-center text-ink/70" type="button" aria-label="Поиск записей" onClick={() => { setSearchOpen((value) => !value); window.setTimeout(() => searchRef.current?.focus(), 0); }}>
+              <Search className="ic" strokeWidth={1.8} />
             </button>
             {searchOpen && (
               <div className="search-pop panel">
@@ -350,23 +380,26 @@ export function JournalBoard() {
               </div>
             )}
           </div>
-          <button className="btn-gradient" onClick={() => setSeed({ staffId: visibleStaff[0]?.id ?? "", startMin: dayStart, date })}>+ Запись</button>
+          <button className="h-10 px-4 rounded-xl grad cta text-white text-[13px] font-semibold flex items-center gap-1.5 whitespace-nowrap" type="button" onClick={() => setSeed({ staffId: visibleStaff[0]?.id ?? "", startMin: dayStart, date })}>
+            <Plus className="w-4 h-4" strokeWidth={1.8} />
+            Запись
+          </button>
         </div>
-      </div>
+      </header>
       {journal && (
-        <div className="stat-row">
-          <div className="stat-item"><span className="stat-ico"><CalendarDays size={15} /></span><div><b>{formatMoney(journal.stats.expectedRevenueMinor)}</b><span>ожидаемая выручка</span></div></div>
-          <div className="stat-item"><span className="stat-ico"><Clock size={15} /></span><div><b>{journal.stats.loadPercent}%</b><span>загрузка дня</span></div></div>
-          <div className="stat-item"><span className="stat-ico"><Sparkles size={15} /></span><div><b>{journal.stats.onlineCount}</b><span>записи сделал AI</span></div></div>
-          <div className="stat-item"><span className="stat-ico"><UserRound size={15} /></span><div><b>{journal.stats.newClients}</b><span>новых клиента</span></div></div>
+        <div className="flex items-center gap-8 px-6 mt-4 shrink-0">
+          <div className="flex items-center gap-2.5"><span className="w-8 h-8 rounded-xl bg-white solid grid place-items-center text-acc"><Wallet className="w-4 h-4" strokeWidth={1.8} /></span><div className="leading-tight"><div className="text-[14px] font-semibold whitespace-nowrap">{rub(journal.stats.expectedRevenueMinor)}</div><div className="text-[11px] text-muted whitespace-nowrap">ожидаемая выручка</div></div></div>
+          <div className="flex items-center gap-2.5"><span className="w-8 h-8 rounded-xl bg-white solid grid place-items-center text-acc"><Gauge className="w-4 h-4" strokeWidth={1.8} /></span><div className="leading-tight"><div className="text-[14px] font-semibold whitespace-nowrap">{journal.stats.loadPercent}%</div><div className="text-[11px] text-muted whitespace-nowrap">загрузка дня</div></div></div>
+          <div className="flex items-center gap-2.5"><span className="w-8 h-8 rounded-xl bg-white solid grid place-items-center text-acc"><Sparkles className="w-4 h-4" strokeWidth={1.8} /></span><div className="leading-tight"><div className="text-[14px] font-semibold whitespace-nowrap">{ruRecords(journal.stats.onlineCount)}</div><div className="text-[11px] text-muted whitespace-nowrap">сделал AI</div></div></div>
+          <div className="flex items-center gap-2.5"><span className="w-8 h-8 rounded-xl bg-white solid grid place-items-center text-acc"><UserPlus className="w-4 h-4" strokeWidth={1.8} /></span><div className="leading-tight"><div className="text-[14px] font-semibold whitespace-nowrap">{journal.stats.newClients}</div><div className="text-[11px] text-muted whitespace-nowrap">новых клиента</div></div></div>
         </div>
       )}
       {view !== "day" ? (
-        <div className="panel empty">Неделя и месяц — следующая фаза. Сейчас работает дневной журнал.</div>
+        <div className="m-6 panel empty">Неделя и месяц — следующая фаза. Сейчас работает дневной журнал.</div>
       ) : (
-        <div className="cal-scroll" ref={columnsRef}>
-          {loading && !journal && <div className="skeleton" />}
-          {error && <div className="banner">{error}</div>}
+        <div className="flex flex-1 flex-col min-h-0 mt-4">
+          {loading && !journal && <div className="skeleton mx-6" />}
+          {error && <div className="banner mx-6">{error}</div>}
           {journal && visibleStaff.length === 0 && (
             <div className="empty">
               <strong>Нет смен</strong>
@@ -375,89 +408,107 @@ export function JournalBoard() {
             </div>
           )}
           {journal && visibleStaff.length > 0 && (
-            <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${visibleStaff.length}, minmax(0, 1fr))` }}>
-              <div />
-              {visibleStaff.map((staff) => {
-                const photo = portraitFor(staff.name);
-                return (
-                  <div className="master-head" key={staff.id}>
-                    {photo ? <img className="face" src={photo} alt="" /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <strong>{staff.name}</strong>
-                      <div className="load" aria-label={`Загрузка ${staff.loadPercent}%`}>
-                        <i><span style={{ width: `${Math.min(100, staff.loadPercent)}%` }} /></i>
-                        <em>{staff.loadPercent}%</em>
+            <>
+              <div className="flex h-14 border-y border-ink/[.06] bg-white/40 shrink-0">
+                <div className="w-14 shrink-0" />
+                {visibleStaff.map((staff) => {
+                  const photo = portraitFor(staff.name);
+                  return (
+                    <div className="flex-1 flex items-center gap-2.5 px-3 min-w-0" key={staff.id}>
+                      <div className="relative shrink-0">
+                        {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover border-2 border-white avatar-shadow" /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
+                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white" />
+                      </div>
+                      <div className="leading-tight min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold truncate">{staff.name}</div>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <div className="h-1 w-12 rounded-full bg-ink/10"><div className="h-full rounded-full grad" style={{ width: `${Math.min(100, staff.loadPercent)}%` }} /></div>
+                          <span className="text-[11px] text-muted">{staff.loadPercent}%</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-              <div className="gutter">
-                {hours.map((minute) => (
-                  <div key={minute} className="hour-label" style={{ top: `${((minute - dayStart) / span) * 100}%` }}>
-                    {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
-                  </div>
-                ))}
-                {showNow && <div className="now-pill" style={{ top: `${((nowMin - dayStart) / span) * 100}%` }}>{`${String(Math.floor(nowMin / 60)).padStart(2, "0")}:${String(nowMin % 60).padStart(2, "0")}`}</div>}
+                  );
+                })}
               </div>
-              {visibleStaff.map((staff) => (
-                <div
-                  key={staff.id}
-                  className="day-col"
-                  data-staff={staff.id}
-                  onClick={(event) => {
-                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                    const minute = dayStart + Math.round((event.clientY - rect.top) / px / 5) * 5;
-                    setSeed({ staffId: staff.id, startMin: minute, date });
-                  }}
-                >
-                  {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: `${((minute - dayStart) / span) * 100}%` }} />)}
-                  {showNow && staff.id === visibleStaff[0].id && (
-                    <div className="now-line" style={{ top: `${((nowMin - dayStart) / span) * 100}%`, left: 0, width: `${visibleStaff.length * 100}%` }} />
-                  )}
-                  {journal.appointments.filter((appt) => appt.staffId === staff.id).map((appt) => {
-                    const preview = drag?.id === appt.id && drag.active ? drag : null;
-                    const start = preview && preview.previewStaff === staff.id ? preview.previewStart : appt.startMin;
-                    const end = preview && preview.previewStaff === staff.id ? preview.previewEnd : appt.endMin;
-                    const movedAway = preview && preview.previewStaff !== staff.id;
-                    const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
-                    const blockPx = ((end - start) / span) * (trackH || span * px);
-                    const serviceTitle = `${appt.services[0]?.title ?? ""}${appt.services.length > 1 ? ` +${appt.services.length - 1}` : ""}`;
-                    const tight = blockPx < 54;
-                    return (
-                      <button
-                        key={appt.id}
-                        className={`appt ${appt.status === "cancelled" ? "cancelled" : ""} ${preview ? "preview" : ""} ${preview?.invalid ? "bad" : ""}`}
-                        style={{
-                          top: `${((start - dayStart) / span) * 100}%`,
-                          height: `calc(${((end - start) / span) * 100}% - 3px)`,
-                          background: `linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)), ${appt.color}`,
-                          borderLeft: "3px solid rgba(80, 30, 70, 0.18)",
-                          opacity: movedAway ? 0.35 : 1,
-                        }}
-                        onPointerDown={(event) => onBlockPointerDown(event, appt, "move")}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {tight ? (
-                          <b>{appt.clientName || "Без имени"}{serviceTitle ? ` · ${serviceTitle}` : ""}</b>
-                        ) : (
-                          <>
-                            {blockPx >= 72 && <span className="when">{hh(start)}–{hh(end)}</span>}
-                            <b>{appt.clientName || "Без имени"}</b>
-                            {serviceTitle && <small>{serviceTitle}</small>}
-                          </>
-                        )}
-                        {appt.source === "online" && <span className="ai-badge">AI</span>}
-                        <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
-                      </button>
-                    );
-                  })}
-                  {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
-                    <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: `${((drag.previewStart - dayStart) / span) * 100}%`, height: `calc(${((drag.previewEnd - drag.previewStart) / span) * 100}% - 3px)`, background: "#efe7ff" }} />
+              <div className="flex flex-1 relative overflow-hidden min-h-0" ref={columnsRef}>
+                <div className="w-14 shrink-0 relative">
+                  {marks.filter((minute) => minute > dayStart && minute < dayEnd).map((minute) => (
+                    <div key={minute} className="absolute right-3 text-[11px] text-muted font-medium -translate-y-1/2" style={{ top: ((minute - dayStart) / 60) * hourPx }}>
+                      {hh(minute)}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-1 relative">
+                  {marks.map((minute) => (
+                    <div key={minute} className="absolute inset-x-0 border-t border-ink/[.06]" style={{ top: ((minute - dayStart) / 60) * hourPx }} />
+                  ))}
+                  {visibleStaff.map((staff) => (
+                    <div
+                      key={staff.id}
+                      className="day-col flex-1 border-l border-ink/[.06] relative"
+                      data-staff={staff.id}
+                      onClick={(event) => {
+                        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                        const minute = dayStart + Math.round((event.clientY - rect.top) / px / 5) * 5;
+                        setSeed({ staffId: staff.id, startMin: minute, date });
+                      }}
+                    >
+                      {journal.appointments.filter((appt) => appt.staffId === staff.id).map((appt) => {
+                        const preview = drag?.id === appt.id && drag.active ? drag : null;
+                        const start = preview && preview.previewStaff === staff.id ? preview.previewStart : appt.startMin;
+                        const end = preview && preview.previewStaff === staff.id ? preview.previewEnd : appt.endMin;
+                        const movedAway = preview && preview.previewStaff !== staff.id;
+                        const tone = toneFor(staff.name);
+                        const serviceTitle = appt.services[0]?.title ?? "";
+                        const longEnough = end - start >= 60;
+                        const ai = appt.source === "online";
+                        return (
+                          <button
+                            key={appt.id}
+                            className={`appt absolute left-1.5 right-1.5 rounded-2xl border-l-[3px] px-3 py-2 overflow-hidden ${tone.card} ${ai && tone.ring ? "ring-2 ring-fuchsia-400/60" : ""} ${appt.status === "cancelled" ? "cancelled" : ""} ${preview ? "preview" : ""} ${preview?.invalid ? "bad" : ""}`}
+                            style={{
+                              top: ((start - dayStart) / 60) * hourPx + 3,
+                              height: Math.max(32, ((end - start) / 60) * hourPx - 6),
+                              boxShadow: "0 6px 16px -10px rgba(90,40,140,.25)",
+                              opacity: movedAway ? 0.35 : undefined,
+                            }}
+                            onPointerDown={(event) => onBlockPointerDown(event, appt, "move")}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className={`flex items-center text-[11px] font-medium ${tone.sub}`}>
+                              <span className="whitespace-nowrap">{hh(start)}–{hh(end)}</span>
+                              {ai && (
+                                <span className="ml-auto flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md grad text-white">
+                                  <Sparkles className="w-2.5 h-2.5" strokeWidth={1.8} />
+                                  AI
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-[13px] font-semibold truncate ${tone.title}`}>{appt.clientName || "Без имени"}</div>
+                            {longEnough && serviceTitle && <div className={`text-[11px] mt-0.5 truncate ${tone.sub}`}>{serviceTitle}</div>}
+                            <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
+                          </button>
+                        );
+                      })}
+                      {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
+                        <div className={`appt preview ${drag.invalid ? "bad" : ""} absolute left-1.5 right-1.5 rounded-2xl bg-violet-100`} style={{ top: ((drag.previewStart - dayStart) / 60) * hourPx + 3, height: Math.max(32, ((drag.previewEnd - drag.previewStart) / 60) * hourPx - 6) }} />
+                      )}
+                    </div>
+                  ))}
+                  {showNow && (
+                    <div className="absolute inset-x-0 z-10 pointer-events-none" style={{ top: ((nowMin - dayStart) / 60) * hourPx }}>
+                      <div className="h-[2px] grad" />
+                      <div className="absolute -left-1.5 -top-[5px] w-3 h-3 rounded-full grad border-2 border-white" />
+                    </div>
                   )}
                 </div>
-              ))}
-            </div>
+                {showNow && (
+                  <div className="absolute left-1 z-10 text-[10px] font-bold text-white grad rounded-md px-1 py-0.5 -translate-y-1/2 pointer-events-none" style={{ top: ((nowMin - dayStart) / 60) * hourPx }}>
+                    {hh(nowMin)}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -474,6 +525,7 @@ export function JournalBoard() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
+

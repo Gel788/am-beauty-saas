@@ -1,0 +1,7 @@
+{
+  "dashboard": 5.97,
+  "journal": 4.19,
+  "tolerance": 0.5,
+  "viewport": { "width": 1440, "height": 900 },
+  "note": "pixelmatch % against docs/design/src at 1440x900. npm run visual:check fails when a screen exceeds its baseline by more than 0.5 percentage points. Remaining difference is live text and numbers."
+}

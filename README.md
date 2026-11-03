@@ -32,6 +32,18 @@ npm run dev
 
 Новый салон можно создать на `/register`: появится отдельный тенант и филиал.
 
+## Design guard
+
+Экраны дашборда и журнала повторяют макеты в `docs/design/` (PNG и HTML в `docs/design/src/`). Токены и правило «port from mockups HTML, verify with visual-compare, diff must not regress» — в `docs/design/DESIGN-SYSTEM.md`. Локальный агент обязан следовать `.cursor/rules/design-guard.mdc`.
+
+Перед сдачей UI:
+
+```bash
+npm run visual:check
+```
+
+Скрипт `scripts/visual-compare` снимает макет и приложение в 1440×900, кладёт side-by-side PNG в `scripts/visual-compare/out/` и падает, если pixelmatch выше `scripts/visual-compare/baseline.json` больше чем на 0,5 п.п. Приложение должно быть запущено и засеяно. Отдельно проверьте, что на 1440×900 и 1280×800 ничего не переносится и не обрезается.
+
 ## Тесты
 
 ```bash

@@ -118,106 +118,205 @@ for (const [person, keys] of Object.entries(links)) {
   }
 }
 
-const clients = [
-  ["Анна Смирнова", "+79001110001"],
-  ["Ксения Орлова", "+79001110002"],
-  ["Виктория Павлова", "+79001110003"],
-  ["Юлия Морозова", "+79001110004"],
-  ["Ольга Белова", "+79001110005"],
-  ["Мария Кузнецова", "+79001110006"],
-  ["Полина Зайцева", "+79001110007"],
-  ["Дарья Фёдорова", "+79001110008"],
-  ["Алёна Егорова", "+79001110009"],
-  ["Игорь Петров", "+79001110010"],
-  ["Артём Новиков", "+79001110011"],
-  ["Максим Ильин", "+79001110012"],
-  ["Сергей Лебедев", "+79001110013"],
-  ["Никита Попов", "+79001110014"],
-  ["Роман Козлов", "+79001110015"],
-  ["Олег Семёнов", "+79001110016"],
-  ["Татьяна Волкова", "+79001110017"],
-  ["Наталья Соловьёва", "+79001110018"],
-  ["Ирина Васильева", "+79001110019"],
+await client.query("UPDATE branches SET grid_label_min = 60 WHERE tenant_id = $1", [tenant]);
+
+function shiftDate(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function atOn(iso, hours, minutes) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, hours - 3, minutes, 0));
+}
+
+const named = [
+  "Анна Смирнова",
+  "Ксения Орлова",
+  "Виктория Павлова",
+  "Юлия Морозова",
+  "Ольга Белова",
+  "Мария Кузнецова",
+  "Полина Зайцева",
+  "Дарья Фёдорова",
+  "Алёна Егорова",
+  "Игорь Петров",
+  "Артём Новиков",
+  "Максим Ильин",
+  "Сергей Лебедев",
+  "Никита Попов",
+  "Роман Козлов",
+  "Олег Семёнов",
+  "Татьяна Волкова",
+  "Наталья Соловьёва",
+  "Ирина Васильева",
 ];
+const fresh = new Set(["Юлия Морозова", "Ольга Белова", "Максим Ильин", "Ирина Васильева"]);
+const firstNames = ["Светлана", "Надежда", "Вера", "Людмила", "Галина", "Инна", "Лариса", "Оксана", "Жанна", "Регина", "Карина", "Милана", "Алиса", "Валерия", "Диана", "Екатерина", "Кристина", "Маргарита", "София", "Ульяна", "Яна", "Борис", "Глеб", "Кирилл", "Лев", "Матвей", "Павел", "Степан", "Тимур", "Фёдор"];
+const lastNames = ["Ильина", "Ким", "Белых", "Орлова", "Кузнецова", "Соколова", "Морозова", "Волкова", "Лебедева", "Новикова", "Павлова", "Семёнова", "Козлова", "Егорова", "Зайцева"];
+const used = new Set(named);
+const generated = [];
+let nameCursor = 0;
+while (generated.length < 53 && nameCursor < 2000) {
+  const name = `${firstNames[nameCursor % firstNames.length]} ${lastNames[Math.floor(nameCursor / firstNames.length) % lastNames.length]}`;
+  nameCursor += 1;
+  if (used.has(name)) continue;
+  used.add(name);
+  generated.push(name);
+}
+if (generated.length < 53) throw new Error("Not enough unique demo client names");
+const repeatExtras = generated.slice(0, 30);
+const dormantNames = generated.slice(30);
+
 const clientIds = {};
-for (const [name, phone] of clients) {
+let phoneSeq = 1;
+async function addClient(name, createdAt) {
   const id = crypto.randomUUID();
   clientIds[name] = id;
-  await client.query("INSERT INTO clients (id, tenant_id, name, source) VALUES ($1, $2, $3, 'walk-in')", [id, tenant, name]);
+  const phone = `+7900${String(phoneSeq).padStart(7, "0")}`;
+  phoneSeq += 1;
+  await client.query(
+    "INSERT INTO clients (id, tenant_id, name, source, created_at) VALUES ($1, $2, $3, 'walk-in', $4)",
+    [id, tenant, name, createdAt],
+  );
   await client.query(
     "INSERT INTO client_phones (id, tenant_id, client_id, phone_e164, is_primary) VALUES ($1, $2, $3, $4, true)",
     [crypto.randomUUID(), tenant, id, phone],
   );
 }
 
-const plan = [
-  ["alina", "Анна Смирнова", "manicure", 10, 0, "scheduled"],
-  ["alina", "Ксения Орлова", "removal", 12, 0, "confirmed"],
-  ["alina", "Виктория Павлова", "gel", 13, 30, "in_progress"],
-  ["alina", "Юлия Морозова", "brows", 17, 0, "scheduled"],
-  ["alina", "Ольга Белова", "gel", 18, 0, "scheduled"],
-  ["marina", "Мария Кузнецова", "brows", 10, 30, "arrived"],
-  ["marina", "Полина Зайцева", "lashes", 12, 0, "scheduled"],
-  ["marina", "Дарья Фёдорова", "brows", 14, 30, "scheduled"],
-  ["marina", "Алёна Егорова", "lashes", 16, 0, "scheduled"],
-  ["denis", "Игорь Петров", "hair", 10, 0, "completed"],
-  ["denis", "Артём Новиков", "beard", 11, 0, "scheduled"],
-  ["denis", "Максим Ильин", "hair", 12, 30, "scheduled"],
-  ["denis", "Сергей Лебедев", "hair", 14, 0, "scheduled"],
-  ["denis", "Никита Попов", "beard", 15, 0, "scheduled"],
-  ["denis", "Роман Козлов", "color", 16, 30, "scheduled"],
-  ["denis", "Олег Семёнов", "beard", 18, 30, "scheduled"],
-  ["elena", "Татьяна Волкова", "massage", 11, 0, "scheduled"],
-  ["elena", "Наталья Соловьёва", "spa", 14, 0, "confirmed"],
-  ["elena", "Ирина Васильева", "back", 17, 0, "scheduled"],
-];
+for (const name of named) {
+  const createdAt = fresh.has(name) ? at(0, 10).toISOString() : atOn(shiftDate(today, -50), 11, 0).toISOString();
+  await addClient(name, createdAt);
+}
+for (const name of repeatExtras) await addClient(name, atOn(shiftDate(today, -40), 11, 0).toISOString());
+for (const name of dormantNames) await addClient(name, atOn(shiftDate(today, -90), 11, 0).toISOString());
 
-// Юлия booked brows but Alina does not offer brows. Use gel instead.
-plan[3][2] = "gel";
+const shiftId = crypto.randomUUID();
+await client.query(
+  `INSERT INTO cash_shifts (id, tenant_id, branch_id, opened_by, opening_cash_minor, status, note, opened_at)
+   VALUES ($1, $2, $3, $4, 1000000, 'open', 'утро', $5)`,
+  [shiftId, tenant, branch, users.admin, atOn(shiftDate(today, -40), 9, 0).toISOString()],
+);
 
-let paidAppointment = null;
-for (const [person, clientName, serviceKey, hour, minute, status] of plan) {
+async function book({ person, clientName, serviceKey, title, iso, hour, minute, duration, status, source, pay }) {
   const service = services[serviceKey];
-  const starts = at(hour, minute);
-  const ends = new Date(starts.getTime() + service[1] * 60000);
+  const starts = atOn(iso, hour, minute);
+  const ends = new Date(starts.getTime() + duration * 60000);
   const id = crypto.randomUUID();
-  if (status === "completed") paidAppointment = { id, price: service[2], clientId: clientIds[clientName] };
+  const price = service[2];
   await client.query(
     `INSERT INTO appointments (
       id, tenant_id, branch_id, staff_id, client_id, starts_at, ends_at, branch_tz, tz_offset_min,
       status, source, color, created_by, updated_by
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,'Europe/Moscow',180,$8,'admin',$9,$10,$10)`,
-    [id, tenant, branch, staff[person], clientIds[clientName], starts.toISOString(), ends.toISOString(), status, service[3], users.admin],
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,'Europe/Moscow',180,$8,$9,$10,$11,$11)`,
+    [id, tenant, branch, staff[person], clientIds[clientName], starts.toISOString(), ends.toISOString(), status, source, service[3], users.admin],
   );
   await client.query(
     `INSERT INTO appointment_services (id, tenant_id, appointment_id, service_id, title_snapshot, duration_min, price_minor, position)
      VALUES ($1,$2,$3,$4,$5,$6,$7,0)`,
-    [crypto.randomUUID(), tenant, id, serviceIds[serviceKey], service[0], service[1], service[2]],
+    [crypto.randomUUID(), tenant, id, serviceIds[serviceKey], title, duration, price],
   );
+  if (pay) {
+    const paymentId = crypto.randomUUID();
+    await client.query(
+      `INSERT INTO payments (id, tenant_id, branch_id, appointment_id, client_id, shift_id, direction, status, total_minor, created_by, posted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'in','posted',$7,$8,$9)`,
+      [paymentId, tenant, branch, id, clientIds[clientName], shiftId, price, users.admin, ends.toISOString()],
+    );
+    await client.query(
+      `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, title, amount_minor)
+       VALUES ($1,$2,$3,'service',$4,$5)`,
+      [crypto.randomUUID(), tenant, paymentId, title, price],
+    );
+    await client.query(
+      "INSERT INTO payment_tenders (id, tenant_id, payment_id, method, amount_minor) VALUES ($1,$2,$3,'card',$4)",
+      [crypto.randomUUID(), tenant, paymentId, price],
+    );
+  }
 }
 
-const shiftId = crypto.randomUUID();
-await client.query(
-  `INSERT INTO cash_shifts (id, tenant_id, branch_id, opened_by, opening_cash_minor, status, note)
-   VALUES ($1, $2, $3, $4, 1000000, 'open', 'утро')`,
-  [shiftId, tenant, branch, users.admin],
-);
-if (paidAppointment) {
-  const paymentId = crypto.randomUUID();
-  await client.query(
-    `INSERT INTO payments (id, tenant_id, branch_id, appointment_id, client_id, shift_id, direction, status, total_minor, created_by, posted_at)
-     VALUES ($1,$2,$3,$4,$5,$6,'in','posted',$7,$8, now())`,
-    [paymentId, tenant, branch, paidAppointment.id, paidAppointment.clientId, shiftId, paidAppointment.price, users.admin],
-  );
-  await client.query(
-    `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, title, amount_minor)
-     VALUES ($1,$2,$3,'service','Мужская стрижка',$4)`,
-    [crypto.randomUUID(), tenant, paymentId, paidAppointment.price],
-  );
-  await client.query(
-    "INSERT INTO payment_tenders (id, tenant_id, payment_id, method, amount_minor) VALUES ($1,$2,$3,'card',$4)",
-    [crypto.randomUUID(), tenant, paymentId, paidAppointment.price],
-  );
+const todayPlan = [
+  ["alina", "Анна Смирнова", "manicure", "Маникюр + гель-лак", 10, 0, 90, "scheduled", "admin"],
+  ["alina", "Ксения Орлова", "removal", "Снятие + укрепление", 12, 0, 60, "confirmed", "admin"],
+  ["alina", "Виктория Павлова", "manicure", "Маникюр с дизайном", 13, 0, 90, "in_progress", "online"],
+  ["alina", "Юлия Морозова", "gel", "Коррекция покрытия", 17, 0, 60, "scheduled", "admin"],
+  ["alina", "Ольга Белова", "gel", "Покрытие гель-лак", 18, 0, 60, "scheduled", "admin"],
+  ["marina", "Мария Кузнецова", "brows", "Коррекция бровей", 10, 30, 60, "arrived", "admin"],
+  ["marina", "Полина Зайцева", "lashes", "Ламинирование ресниц", 12, 0, 90, "scheduled", "admin"],
+  ["marina", "Дарья Фёдорова", "brows", "Окрашивание бровей", 14, 30, 60, "scheduled", "online"],
+  ["marina", "Алёна Егорова", "brows", "Брови «под ключ»", 16, 0, 90, "scheduled", "admin"],
+  ["denis", "Игорь Петров", "hair", "Мужская стрижка", 10, 0, 60, "scheduled", "admin"],
+  ["denis", "Артём Новиков", "beard", "Стрижка + борода", 11, 0, 60, "scheduled", "admin"],
+  ["denis", "Максим Ильин", "beard", "Оформление бороды", 12, 30, 45, "scheduled", "admin"],
+  ["denis", "Сергей Лебедев", "hair", "Мужская стрижка", 14, 0, 60, "scheduled", "online"],
+  ["denis", "Никита Попов", "hair", "Стрижка машинкой", 15, 0, 60, "scheduled", "admin"],
+  ["denis", "Роман Козлов", "color", "Камуфляж седины", 16, 30, 90, "scheduled", "admin"],
+  ["denis", "Олег Семёнов", "beard", "Стрижка + борода", 18, 30, 60, "scheduled", "admin"],
+  ["elena", "Татьяна Волкова", "massage", "Классический массаж", 11, 0, 90, "scheduled", "admin"],
+  ["elena", "Наталья Соловьёва", "spa", "SPA-программа", 14, 0, 120, "confirmed", "admin"],
+  ["elena", "Ирина Васильева", "back", "Массаж спины", 17, 0, 60, "scheduled", "admin"],
+];
+
+for (const [person, clientName, serviceKey, title, hour, minute, duration, status, source] of todayPlan) {
+  await book({ person, clientName, serviceKey, title, iso: today, hour, minute, duration, status, source, pay: false });
+}
+
+const historyPool = [...named.filter((name) => !fresh.has(name)), ...repeatExtras];
+let visit = 0;
+let poolCursor = 0;
+for (let offset = 1; offset <= 40; offset += 1) {
+  const iso = shiftDate(today, -offset);
+  for (const person of ["alina", "marina", "denis", "elena"]) {
+    let minuteOfDay = 10 * 60;
+    const menu = links[person];
+    while (minuteOfDay < 19 * 60) {
+      const serviceKey = menu[visit % menu.length];
+      const duration = services[serviceKey][1];
+      if (minuteOfDay + duration > 20 * 60) break;
+      const clientName = historyPool[poolCursor % historyPool.length];
+      poolCursor += 1;
+      let title = services[serviceKey][0];
+      if (serviceKey === "brows") title = "Брови «под ключ»";
+      if (serviceKey === "manicure" && visit % 6 === 0) title = "Маникюр с дизайном";
+      const noShow = offset <= 30 ? visit % 45 === 0 : visit % 14 === 0;
+      await book({
+        person,
+        clientName,
+        serviceKey,
+        title,
+        iso,
+        hour: Math.floor(minuteOfDay / 60),
+        minute: minuteOfDay % 60,
+        duration,
+        status: noShow ? "no_show" : "completed",
+        source: "admin",
+        pay: !noShow,
+      });
+      visit += 1;
+      minuteOfDay += duration + 30;
+    }
+  }
+}
+
+for (let index = 0; index < dormantNames.length; index += 1) {
+  const person = ["alina", "marina", "denis", "elena"][index % 4];
+  const serviceKey = links[person][0];
+  await book({
+    person,
+    clientName: dormantNames[index],
+    serviceKey,
+    title: services[serviceKey][0],
+    iso: shiftDate(today, -70 - index),
+    hour: 11,
+    minute: 0,
+    duration: services[serviceKey][1],
+    status: "completed",
+    source: "admin",
+    pay: true,
+  });
 }
 
 await client.query("COMMIT");

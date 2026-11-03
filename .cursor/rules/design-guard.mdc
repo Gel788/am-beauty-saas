@@ -1,0 +1,6 @@
+---
+description: Keep Am Beauty UI on the approved mockups and design tokens
+alwaysApply: true
+---
+
+The mockups in docs/design/ (PNG plus HTML sources in docs/design/src/) and docs/design/DESIGN-SYSTEM.md are the source of truth for UI. Never invent styles or hardcode colors, shadows or radii; use only the design tokens and reuse existing components. Any new screen or component must follow the mockup visual language (light warm background, aurora + grain, glass cards, violet-magenta-pink gradient accent, Unbounded headings with Inter body, AI orb). Never simplify or flatten existing styling: no removing gradients, glass, icons, badges or orb. Before finishing any UI task, run scripts/visual-compare, attach the side-by-side PNGs and diff %, and the diff must not exceed the committed baseline. Also check that nothing wraps or clips at 1440x900 and 1280x800. If a screen has no mockup, say so and propose a design in the same language instead of improvising silently. A task is not done without this evidence.

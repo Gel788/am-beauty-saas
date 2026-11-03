@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Unbounded:wght@400;500;600;700&family=Playfair+Display:ital,wght@1,500;1,600;1,700&display=swap" rel="stylesheet">
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],display:['Unbounded','sans-serif'],serif:['Playfair Display','serif']},colors:{bg:'#FBF8F6',ink:'#1A1523',muted:'#7B7385',line:'#EEE7E3',acc:'#7C3AED'}}}}</script>
+<style>
+body{font-family:Inter,sans-serif;-webkit-font-smoothing:antialiased;color:#1A1523;background:#FBF8F6}
+.font-display{letter-spacing:-.02em}
+.glass{background:rgba(255,255,255,.62);backdrop-filter:blur(24px) saturate(160%);-webkit-backdrop-filter:blur(24px) saturate(160%);border:1px solid rgba(255,255,255,.85);box-shadow:0 1px 1px rgba(60,30,90,.03),0 4px 10px -4px rgba(60,30,90,.06),0 24px 48px -24px rgba(90,40,140,.18)}
+.solid{background:#fff;border:1px solid #F1EAE6;box-shadow:0 1px 2px rgba(60,30,90,.04),0 12px 32px -16px rgba(90,40,140,.16)}
+.grad{background:linear-gradient(120deg,#7C3AED 0%,#C026D3 55%,#F472B6 100%)}
+.gradtext{background:linear-gradient(100deg,#6D28D9,#DB2777 60%,#F97316);-webkit-background-clip:text;background-clip:text;color:transparent}
+.cta{box-shadow:0 14px 30px -10px rgba(192,38,211,.55),inset 0 1px 0 rgba(255,255,255,.35)}
+.blob{position:absolute;border-radius:9999px;filter:blur(70px);pointer-events:none}
+.ic{width:18px;height:18px;stroke-width:1.8}
+.orb{border-radius:9999px;background:radial-gradient(circle at 32% 28%,#fff 0,#FBCFE8 14%,#E879F9 34%,#A855F7 58%,#6D28D9 82%,#4C1D95 100%);box-shadow:0 0 0 1px rgba(255,255,255,.6) inset,0 6px 18px -4px rgba(192,38,211,.55),0 0 28px -6px rgba(244,114,182,.7)}
+.mono{background:linear-gradient(145deg,#2A1B3D,#1A1523);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 10px 24px -10px rgba(76,29,149,.6)}
+.mono span{background:linear-gradient(100deg,#E9D5FF,#F9A8D4 50%,#FDBA74);-webkit-background-clip:text;background-clip:text;color:transparent}
+.grain{position:absolute;inset:0;pointer-events:none;z-index:60;opacity:.07;mix-blend-mode:multiply;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+</style></head><body>
+<div class="w-[390px] h-[844px] overflow-hidden relative bg-bg">
+<div class="blob" style="width:300px;height:300px;background:#FFE1C7;bottom:60px;right:-120px;opacity:.8"></div>
+<div class="blob" style="width:280px;height:280px;background:#E5D9FF;top:330px;left:-140px;opacity:.9"></div>
+<div class="relative h-[244px]">
+ <img src="img/salon.jpg" class="absolute inset-0 w-full h-full object-cover" style="object-position:50% 60%">
+ <div class="absolute inset-0" style="background:linear-gradient(180deg,rgba(26,21,35,.35) 0%,rgba(26,21,35,.05) 30%,rgba(60,20,90,.55) 70%,rgba(26,21,35,.85) 100%)"></div>
+ <div class="relative px-5 pt-3.5 flex justify-between text-[14px] font-semibold text-white"><span>9:41</span><span class="flex gap-1.5 items-center"><i data-lucide="signal" class="w-4 h-4"></i><i data-lucide="wifi" class="w-4 h-4"></i><i data-lucide="battery-full" class="w-5 h-5"></i></span></div>
+ <div class="relative px-5 mt-3 flex justify-between">
+  <span class="w-10 h-10 rounded-full bg-white/25 backdrop-blur-md border border-white/40 grid place-items-center text-white"><i data-lucide="chevron-left" class="ic"></i></span>
+  <div class="flex gap-2"><span class="w-10 h-10 rounded-full bg-white/25 backdrop-blur-md border border-white/40 grid place-items-center text-white"><i data-lucide="share" class="ic"></i></span><span class="w-10 h-10 rounded-full bg-white/25 backdrop-blur-md border border-white/40 grid place-items-center text-white"><i data-lucide="heart" class="ic"></i></span></div>
+ </div>
+ <div class="absolute left-5 right-5 bottom-8 text-white">
+  <div class="flex items-center gap-3"><div class="mono grid place-items-center shrink-0" style="width:48px;height:48px;border-radius:15px"><span class="font-serif italic font-semibold leading-none" style="font-size:22px;margin-top:-2px">Am</span></div><div><div class="flex items-baseline gap-1.5 text-white leading-none"><span class="font-serif italic font-semibold" style="font-size:32px">Am</span><span class="font-display font-medium uppercase" style="font-size:16px;letter-spacing:.32em">Beauty</span></div><div class="text-[11px] text-white/75 mt-1.5 uppercase tracking-[.22em] font-medium">Бьюти-студия · с 2019</div></div></div>
+  <div class="flex items-center gap-2 mt-3.5 text-[12px]">
+   <span class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/25 backdrop-blur-md border border-white/30 font-semibold"><i data-lucide="star" class="w-3.5 h-3.5 fill-amber-300 text-amber-300"></i>4.9</span>
+   <span class="flex -space-x-1.5"><img src="img/vika.jpg" class="w-5 h-5 rounded-full border border-white object-cover"><img src="img/igor.jpg" class="w-5 h-5 rounded-full border border-white object-cover"><img src="img/marina.jpg" class="w-5 h-5 rounded-full border border-white object-cover"></span>
+   <span class="text-white/90">312 отзывов</span><span class="text-white/60">·</span><span class="text-white/90 flex items-center gap-1"><i data-lucide="map-pin" class="w-3.5 h-3.5"></i>Садовая, 14</span>
+  </div>
+ </div>
+</div>
+<div class="relative -mt-6 rounded-t-[28px] bg-bg/70 backdrop-blur-xl px-5 pt-4">
+ <div class="relative rounded-[22px] p-[1.5px] grad cta">
+  <div class="rounded-[21px] bg-white/95 p-3 flex items-center gap-3">
+   <img src="img/alina.jpg" class="w-12 h-12 rounded-2xl object-cover">
+   <div class="flex-1 min-w-0"><div class="text-[11px] font-semibold gradtext flex items-center gap-1"><span class="orb inline-block shrink-0" style="width:13px;height:13px"></span>AI подобрал для вас</div>
+   <div class="text-[14px] font-semibold mt-0.5">Алина · Вт, 13:00</div><div class="text-[12px] text-muted">Как в прошлый раз</div></div>
+   <span class="px-3.5 h-9 rounded-xl bg-ink text-white text-[13px] font-semibold grid place-items-center">Выбрать</span>
+  </div>
+ </div>
+ <div class="flex gap-2 mt-4 text-[13px] font-medium">
+  <span class="px-3.5 py-1.5 rounded-full bg-ink text-white">Маникюр</span><span class="px-3.5 py-1.5 rounded-full solid text-ink/70">Брови</span><span class="px-3.5 py-1.5 rounded-full solid text-ink/70">Стрижка</span><span class="px-3.5 py-1.5 rounded-full solid text-ink/70">Массаж</span>
+ </div>
+ <div class="mt-2.5 rounded-2xl solid px-3 py-2.5 flex items-center gap-3" style="border-color:#D9C8FF">
+  <span class="w-10 h-10 rounded-xl bg-violet-50 grid place-items-center text-acc"><i data-lucide="hand" class="ic"></i></span>
+  <div class="flex-1"><div class="font-semibold text-[14px]">Маникюр с гель-лаком</div><div class="text-[12px] text-muted flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i>1 ч 30 мин</div></div>
+  <span class="font-display font-semibold text-[15px] whitespace-nowrap">2 400 ₽</span>
+ </div>
+ <div class="mt-3.5 flex items-center justify-between"><div class="font-display text-[15px] font-semibold">Мастер</div><div class="text-[12px] text-acc font-medium">Любой свободный</div></div>
+ <div class="flex justify-between mt-2.5"><div class="w-[76px] text-center shrink-0"><div class="relative w-[54px] h-[54px] mx-auto rounded-full p-[2.5px] grad" style="box-shadow:0 8px 18px -8px rgba(90,40,140,.35)"><img src="img/alina.jpg" class="w-full h-full rounded-full object-cover border-2 border-white"><span class="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full grad grid place-items-center border-2 border-white text-white"><i data-lucide="check" class="w-3 h-3"></i></span></div>
+<div class="text-[13px] mt-1.5 font-semibold">Алина</div><div class="text-[11px] text-muted flex items-center justify-center gap-0.5"><i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>5.0</div></div><div class="w-[76px] text-center shrink-0"><div class="relative w-[54px] h-[54px] mx-auto rounded-full p-[2.5px] bg-white" style="box-shadow:0 8px 18px -8px rgba(90,40,140,.35)"><img src="img/marina.jpg" class="w-full h-full rounded-full object-cover border-2 border-white"></div>
+<div class="text-[13px] mt-1.5 font-medium text-ink/75">Марина</div><div class="text-[11px] text-muted flex items-center justify-center gap-0.5"><i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>4.9</div></div><div class="w-[76px] text-center shrink-0"><div class="relative w-[54px] h-[54px] mx-auto rounded-full p-[2.5px] bg-white" style="box-shadow:0 8px 18px -8px rgba(90,40,140,.35)"><img src="img/denis.jpg" class="w-full h-full rounded-full object-cover border-2 border-white"></div>
+<div class="text-[13px] mt-1.5 font-medium text-ink/75">Денис</div><div class="text-[11px] text-muted flex items-center justify-center gap-0.5"><i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>4.9</div></div><div class="w-[76px] text-center shrink-0"><div class="relative w-[54px] h-[54px] mx-auto rounded-full p-[2.5px] bg-white" style="box-shadow:0 8px 18px -8px rgba(90,40,140,.35)"><img src="img/elena.jpg" class="w-full h-full rounded-full object-cover border-2 border-white"></div>
+<div class="text-[13px] mt-1.5 font-medium text-ink/75">Елена</div><div class="text-[11px] text-muted flex items-center justify-center gap-0.5"><i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>4.8</div></div></div>
+ <div class="grid grid-cols-6 gap-2 mt-3"><div class="rounded-2xl py-2 text-center solid"><div class="text-[11px] text-muted">Пн</div><div class="font-display text-[16px] font-semibold mt-0.5 ">9</div></div><div class="rounded-2xl py-2 text-center grad text-white cta"><div class="text-[11px] text-white/80">Вт</div><div class="font-display text-[16px] font-semibold mt-0.5 ">10</div></div><div class="rounded-2xl py-2 text-center solid"><div class="text-[11px] text-muted">Ср</div><div class="font-display text-[16px] font-semibold mt-0.5 ">11</div></div><div class="rounded-2xl py-2 text-center solid"><div class="text-[11px] text-muted">Чт</div><div class="font-display text-[16px] font-semibold mt-0.5 ">12</div></div><div class="rounded-2xl py-2 text-center solid"><div class="text-[11px] text-muted">Пт</div><div class="font-display text-[16px] font-semibold mt-0.5 ">13</div></div><div class="rounded-2xl py-2 text-center opacity-40"><div class="text-[11px] text-muted">Сб</div><div class="font-display text-[16px] font-semibold mt-0.5 line-through">14</div></div></div>
+ <div class="grid grid-cols-4 gap-2 mt-2"><div class="rounded-xl py-2.5 text-center text-[14px] solid font-medium">11:30</div><div class="rounded-xl py-2.5 text-center text-[14px] bg-ink text-white font-semibold">13:00</div><div class="rounded-xl py-2.5 text-center text-[14px] solid font-medium">14:30</div><div class="rounded-xl py-2.5 text-center text-[14px] solid font-medium">16:00</div></div>
+</div>
+<div class="absolute bottom-0 inset-x-0 px-5 pb-6 pt-3 bg-white/70 backdrop-blur-2xl border-t border-white" style="box-shadow:0 -12px 30px -18px rgba(90,40,140,.25)">
+ <button class="w-full h-[58px] rounded-2xl grad cta text-white flex items-center px-5">
+  <div class="text-left"><div class="text-[11px] text-white/80">Вт, 10 ноября · 13:00 · Алина</div><div class="font-semibold text-[16px]">Записаться</div></div>
+  <span class="ml-auto font-display font-semibold text-[16px]">2 400 ₽</span><span class="ml-3 w-8 h-8 rounded-full bg-white/20 grid place-items-center"><i data-lucide="arrow-right" class="w-4 h-4"></i></span></button>
+ <div class="text-center text-[11px] text-muted mt-2 flex items-center justify-center gap-1"><i data-lucide="send" class="w-3 h-3"></i>Напомним в Telegram за 2 часа</div>
+</div>
+</div><div class="grain"></div><script>lucide.createIcons({attrs:{"stroke-width":1.8}});</script></body></html>
