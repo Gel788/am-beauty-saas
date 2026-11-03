@@ -334,7 +334,7 @@ export async function createAppointment(
     clientId = created.id;
   }
   if (!clientId) throw new AppError("VALIDATION", "Выберите клиента");
-  const client = await ensureClient(ctx, clientId);
+  await ensureClient(ctx, clientId);
   let bookedBy: string | null = input.bookedByClientId ?? null;
   if (bookedBy) {
     if (bookedBy === clientId) bookedBy = null;

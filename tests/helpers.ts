@@ -179,7 +179,7 @@ export async function createSalon(): Promise<Salon> {
   return salon;
 }
 
-export function useDb() {
+export function bindTestDb() {
   afterAll(async () => {
     for (const salon of salons.splice(0)) {
       await salon.destroy();

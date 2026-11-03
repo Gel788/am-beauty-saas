@@ -21,9 +21,9 @@ import { addException } from "@/server/catalog";
 import { createPayment, openShift } from "@/server/payments";
 import { setDensity } from "@/server/auth";
 import { one } from "@/server/db";
-import { at, createSalon, run, useDb } from "./helpers";
+import { at, createSalon, run, bindTestDb } from "./helpers";
 
-useDb();
+bindTestDb();
 
 type Salon = Awaited<ReturnType<typeof createSalon>>;
 let salon: Salon;

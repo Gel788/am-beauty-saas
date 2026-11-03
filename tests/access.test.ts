@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { login, register } from "@/server/auth";
 import { createClient } from "@/server/clients";
 import { withSession } from "@/server/db";
-import { createSalon, run, useDb } from "./helpers";
+import { createSalon, run, bindTestDb } from "./helpers";
 
-useDb();
+bindTestDb();
 
 describe("access", () => {
   it("registers a tenant and logs in", async () => {

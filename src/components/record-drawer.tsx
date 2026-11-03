@@ -298,11 +298,20 @@ export function RecordDrawer({
             </div>
             <div className="field">
               <label>Начало</label>
-              <input type="time" value={`${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")}`} onChange={(event) => {
-                const [h, m] = event.target.value.split(":").map(Number);
-                setStartMin(h * 60 + m);
-                mark();
-              }} />
+              <input
+                inputMode="numeric"
+                aria-label="Начало"
+                value={`${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")}`}
+                onChange={(event) => {
+                  const match = event.target.value.match(/^(\d{1,2}):(\d{2})$/);
+                  if (!match) return;
+                  const hours = Number(match[1]);
+                  const minutes = Number(match[2]);
+                  if (hours > 23 || minutes > 59) return;
+                  setStartMin(hours * 60 + minutes);
+                  mark();
+                }}
+              />
             </div>
             <div>
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Услуги · {duration} мин · {formatMoney(price)}</div>

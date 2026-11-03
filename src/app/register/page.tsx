@@ -25,7 +25,7 @@ export default function RegisterPage() {
           }
         }}
       >
-        <div className="logo"><span className="logo-am">Am</span><span className="logo-beauty">BEAUTY</span></div>
+        <div className="wordmark"><span className="am">Am</span><span className="beauty">BEAUTY</span></div>
         <h1 style={{ fontSize: 30 }}>Новый салон</h1>
         <div className="field"><label>Ваше имя</label><input value={form.name} onChange={set("name")} required /></div>
         <div className="field"><label>Название салона</label><input value={form.salonName} onChange={set("salonName")} required /></div>

@@ -14,10 +14,10 @@ import {
   updateService,
 } from "@/server/catalog";
 import { createAppointment, getAppointment } from "@/server/appointments";
-import { at, createSalon, run, useDb } from "./helpers";
+import { at, createSalon, run, bindTestDb } from "./helpers";
 import { one } from "@/server/db";
 
-useDb();
+bindTestDb();
 let salon: Awaited<ReturnType<typeof createSalon>>;
 
 beforeAll(async () => {

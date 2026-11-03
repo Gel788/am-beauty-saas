@@ -195,7 +195,7 @@ export async function createPayment(
   assertMoney(tipMinor, "Чаевые");
 
   let clientId = input.clientId ?? null;
-  let appointmentId = input.appointmentId ?? null;
+  const appointmentId = input.appointmentId ?? null;
   const lines: { type: string; refId: string | null; title: string; amountMinor: number }[] = [];
 
   if (kind === "debt") {

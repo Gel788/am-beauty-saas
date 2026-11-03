@@ -2,10 +2,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createAppointment } from "@/server/appointments";
 import { createClient } from "@/server/clients";
 import { createPayment, openShift } from "@/server/payments";
-import { at, createSalon, run, useDb } from "./helpers";
+import { at, createSalon, run, bindTestDb } from "./helpers";
 import { one } from "@/server/db";
 
-useDb();
+bindTestDb();
 let salon: Awaited<ReturnType<typeof createSalon>>;
 
 beforeAll(async () => {

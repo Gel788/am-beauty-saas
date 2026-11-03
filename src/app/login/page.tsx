@@ -11,7 +11,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   return (
-    <div className="login-wrap">
+    <div className="aurora login-wrap" style={{ height: "auto" }}>
       <form
         className="login-card"
         onSubmit={async (event) => {
@@ -25,9 +25,9 @@ export default function LoginPage() {
           }
         }}
       >
-        <div className="logo">
-          <span className="logo-am">Am</span>
-          <span className="logo-beauty">BEAUTY</span>
+        <div className="wordmark">
+          <span className="am">Am</span>
+          <span className="beauty">BEAUTY</span>
         </div>
         <h1 style={{ fontSize: 32, margin: "8px 0 6px" }}>Вход в студию</h1>
         <p className="muted">Журнал, клиенты и касса салона.</p>
@@ -41,8 +41,10 @@ export default function LoginPage() {
         </div>
         {error && <p className="danger">{error}</p>}
         <button className="btn-gradient" style={{ width: "100%", marginTop: 16 }} type="submit">Войти</button>
-        <p className="muted" style={{ marginTop: 14, fontSize: 13 }}>
-          Демо: olga@ambeauty.local, admin@ambeauty.local, alina@ambeauty.local, buh@ambeauty.local — пароль ambeauty.
+        <p className="muted" style={{ marginTop: 14, fontSize: 13, lineHeight: 1.45 }}>
+          Пароль демо ambeauty
+          <br />
+          olga@ambeauty.local · admin@ · alina@ · buh@
           <br />
           <a href="/register">Открыть новый салон</a>
         </p>

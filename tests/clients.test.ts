@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { adjustBalance, clientHistory, createClient, deleteClient, listClients, searchClients, updateClient } from "@/server/clients";
 import { createAppointment } from "@/server/appointments";
-import { at, createSalon, run, useDb, DAY } from "./helpers";
+import { at, createSalon, run, bindTestDb, DAY } from "./helpers";
 
-useDb();
+bindTestDb();
 let salon: Awaited<ReturnType<typeof createSalon>>;
 
 beforeAll(async () => {

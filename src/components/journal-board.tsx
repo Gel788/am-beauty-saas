@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, Search, Sparkles, UserRound } from "lucide-react";
 import { formatMoney } from "@/domain/money";
-import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
+import type { AppointmentStatus } from "@/domain/status";
 import { addCalendarDays, todayInZone, weekdayLabel, zonedDateTimeToUtc } from "@/domain/time";
 import { hitTestColumn, pointerIntent, resolveDrop } from "@/domain/grid";
 import { api, type ApiError } from "./api";
 import { RecordDrawer, type DrawerSeed } from "./record-drawer";
+import Image from "next/image";
+import { portraitFor } from "./portraits";
 import { useToast } from "./ui";
 
 type Appt = {
@@ -76,11 +78,11 @@ export function JournalBoard() {
   const [date, setDate] = useState(params.get("date") ?? "");
   const [showOff, setShowOff] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
-  const [hidden, setHidden] = useState<string[]>([]);
   const [seed, setSeed] = useState<DrawerSeed | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [view, setView] = useState<"day" | "week" | "month">("day");
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [found, setFound] = useState<{ id: string; clientName: string; staffName: string; startsAt: string; date: string }[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -139,7 +141,8 @@ export function JournalBoard() {
       }
       if (event.key === "/") {
         event.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen(true);
+        window.setTimeout(() => searchRef.current?.focus(), 0);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -157,8 +160,15 @@ export function JournalBoard() {
     return () => window.clearTimeout(timer);
   }, [search, branchId]);
 
-  const visibleStaff = useMemo(() => journal?.staff.filter((staff) => !hidden.includes(staff.id)) ?? [], [journal, hidden]);
-  const px = journal?.density === "compact" ? 0.95 : 1.28;
+  const visibleStaff = useMemo(() => {
+    const order = ["Алина Ковалёва", "Марина Соколова", "Денис Волков", "Елена Лебедева"];
+    return (journal?.staff ?? []).slice().sort((a, b) => {
+      const left = order.indexOf(a.name);
+      const right = order.indexOf(b.name);
+      return (left === -1 ? 99 : left) - (right === -1 ? 99 : right);
+    });
+  }, [journal]);
+  const px = journal?.density === "compact" ? 0.78 : 0.9;
   const dayStart = journal?.dayStartMin ?? 600;
   const dayEnd = journal?.dayEndMin ?? 1200;
   const height = (dayEnd - dayStart) * px;
@@ -238,11 +248,11 @@ export function JournalBoard() {
       if (mode === "move" && pointerIntent(elapsed) === "click") return;
       const delta = Math.round((ev.clientY - startY) / px / 5) * 5;
       const duration = current.originEnd - current.originStart;
-      let previewStart = mode === "resize" ? current.originStart : current.originStart + delta;
-      let previewEnd = mode === "resize" ? current.originEnd + delta : previewStart + duration;
+      const previewStart = mode === "resize" ? current.originStart : current.originStart + delta;
+      const previewEnd = mode === "resize" ? current.originEnd + delta : previewStart + duration;
       const nodes = [...document.querySelectorAll<HTMLElement>("[data-staff]")].map((node) => {
         const rect = node.getBoundingClientRect();
-        return { staffId: node.dataset.staff || "", x: rect.left, width: rect.width, hidden: hidden.includes(node.dataset.staff || "") };
+        return { staffId: node.dataset.staff || "", x: rect.left, width: rect.width, hidden: false };
       });
       const staffId = mode === "move" ? hitTestColumn(nodes, ev.clientX) : appt.staffId;
       const outside = mode === "move" && (staffId == null || Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 0 && staffId == null);
@@ -276,30 +286,51 @@ export function JournalBoard() {
   const step = journal?.branch.gridLabelMin ?? 60;
   for (let minute = dayStart; minute <= dayEnd; minute += step) hours.push(minute);
 
+  const nowMin = (() => {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+    const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+    const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+    return hour * 60 + minute;
+  })();
+  const showNow = date === todayInZone(timezone) && nowMin >= dayStart && nowMin <= dayEnd;
+
   return (
     <>
-      <div className="spread">
-        <div>
+      <div className="journal-top">
+        <div className="journal-title">
           <div className="page-kicker">{date === todayInZone(timezone) ? "Сегодня" : "День"} · {journal?.stats.appointmentCount ?? 0} записей</div>
-          <h1>{date ? weekdayLabel(date, timezone) : "Журнал"}</h1>
+          <div className="date-title">
+            <h1>{date ? weekdayLabel(date, timezone) : "Журнал"}</h1>
+            <button className="chev" type="button" aria-label="Предыдущий день" onClick={() => go(addCalendarDays(date, -1))}><ChevronLeft size={16} /></button>
+            <button className="chev" type="button" aria-label="Следующий день" onClick={() => go(addCalendarDays(date, 1))}><ChevronRight size={16} /></button>
+            <label className="chev" aria-label="Дата">
+              <span className="sr">Дата</span>
+              <input className="sr" type="date" value={date} onChange={(event) => go(event.target.value)} />
+              <CalendarDays size={14} />
+            </label>
+          </div>
         </div>
-        <div className="row">
-          <button className="icon-btn" aria-label="Предыдущий день" onClick={() => go(addCalendarDays(date, -1))}><ChevronLeft size={18} /></button>
-          <button className="btn-ghost" onClick={() => go(todayInZone(timezone))}>Сегодня</button>
-          <button className="icon-btn" aria-label="Следующий день" onClick={() => go(addCalendarDays(date, 1))}><ChevronRight size={18} /></button>
-          <input type="date" value={date} onChange={(event) => go(event.target.value)} aria-label="Дата" />
+        <div className="journal-toolbar">
           <div className="segment">
             <button className={view === "day" ? "on" : ""} onClick={() => setView("day")} type="button">День</button>
             <button className={view === "week" ? "on" : ""} onClick={() => setView("week")} type="button">Неделя</button>
             <button className={view === "month" ? "on" : ""} onClick={() => setView("month")} type="button">Месяц</button>
           </div>
-          <div className="search">
-            <Search size={16} />
-            <input ref={searchRef} value={search} placeholder="Клиент или телефон" aria-label="Поиск записей" onChange={(event) => setSearch(event.target.value)} />
-            {found.length > 0 && (
-              <div className="panel" style={{ position: "absolute", top: 46, left: 0, right: 0, zIndex: 5 }}>
+          <div style={{ position: "relative" }}>
+            <button className="icon-circle" type="button" aria-label="Поиск записей" onClick={() => { setSearchOpen((value) => !value); window.setTimeout(() => searchRef.current?.focus(), 0); }}>
+              <Search size={16} />
+            </button>
+            {searchOpen && (
+              <div className="search-pop panel">
+                <div className="search">
+                  <input ref={searchRef} value={search} placeholder="Клиент или телефон" aria-label="Поиск записей" onChange={(event) => setSearch(event.target.value)} />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button className="chip" type="button" onClick={() => setShowOff((value) => !value)}>{showOff ? "Скрыть выходных" : "Без смены"}</button>
+                  <button className="chip" type="button" onClick={() => setShowCancelled((value) => !value)}>{showCancelled ? "Скрыть отменённые" : "Отменённые"}</button>
+                </div>
                 {found.map((item) => (
-                  <button key={item.id} className="person" type="button" onClick={() => { go(item.date); setSeed({ id: item.id, staffId: "", startMin: 0, date: item.date }); setSearch(""); }}>
+                  <button key={item.id} className="person" type="button" onClick={() => { go(item.date); setSeed({ id: item.id, staffId: "", startMin: 0, date: item.date }); setSearch(""); setSearchOpen(false); }}>
                     <div><strong>{item.clientName}</strong><span>{item.staffName}</span></div>
                   </button>
                 ))}
@@ -310,26 +341,17 @@ export function JournalBoard() {
         </div>
       </div>
       {journal && (
-        <div className="stats">
-          <div className="stat-pill"><span>Ожидаемая выручка</span><b>{formatMoney(journal.stats.expectedRevenueMinor)}</b></div>
-          <div className="stat-pill"><span>Загрузка дня</span><b>{journal.stats.loadPercent}%</b></div>
-          <div className="stat-pill"><span>Онлайн</span><b>{journal.stats.onlineCount}</b></div>
-          <div className="stat-pill"><span>Новые клиенты</span><b>{journal.stats.newClients}</b></div>
+        <div className="stat-row">
+          <div className="stat-item"><span className="stat-ico"><CalendarDays size={15} /></span><div><b>{formatMoney(journal.stats.expectedRevenueMinor)}</b><span>ожидаемая выручка</span></div></div>
+          <div className="stat-item"><span className="stat-ico"><Clock size={15} /></span><div><b>{journal.stats.loadPercent}%</b><span>загрузка дня</span></div></div>
+          <div className="stat-item"><span className="stat-ico"><Sparkles size={15} /></span><div><b>{journal.stats.onlineCount}</b><span>записи сделал AI</span></div></div>
+          <div className="stat-item"><span className="stat-ico"><UserRound size={15} /></span><div><b>{journal.stats.newClients}</b><span>новых клиента</span></div></div>
         </div>
       )}
-      <div className="row">
-        <button className={`chip ${showOff ? "on" : ""}`} onClick={() => setShowOff((value) => !value)} type="button">Показать без смены</button>
-        <button className="chip" onClick={() => setShowCancelled((value) => !value)} type="button">{showCancelled ? "Скрыть отменённые" : "Показать отменённые"}</button>
-        {journal?.staff.map((staff) => (
-          <button key={staff.id} className="chip" type="button" onClick={() => setHidden((current) => current.includes(staff.id) ? current.filter((id) => id !== staff.id) : [...current, staff.id])}>
-            {hidden.includes(staff.id) ? "Показать" : "Скрыть"} {staff.name.split(" ")[0]}
-          </button>
-        ))}
-      </div>
       {view !== "day" ? (
         <div className="panel empty">Неделя и месяц — следующая фаза. Сейчас работает дневной журнал.</div>
       ) : (
-        <div className="panel journal" ref={columnsRef}>
+        <div className="cal-scroll" ref={columnsRef}>
           {loading && !journal && <div className="skeleton" />}
           {error && <div className="banner">{error}</div>}
           {journal && visibleStaff.length === 0 && (
@@ -340,74 +362,80 @@ export function JournalBoard() {
             </div>
           )}
           {journal && visibleStaff.length > 0 && (
-            <div style={{ ["--cols" as string]: visibleStaff.length }}>
-              <div className="journal-head">
-                <div />
-                {visibleStaff.map((staff) => (
-                  <div className="staff-head" key={staff.id}>
-                    <strong>{staff.name}</strong>
-                    <div className="util" aria-label={`Загрузка ${staff.loadPercent}%`}><i style={{ width: `${Math.min(100, staff.loadPercent)}%` }} /></div>
-                  </div>
-                ))}
-              </div>
-              <div className="journal-row" style={{ height }}>
-                <div className="time-col" />
-                {visibleStaff.map((staff) => (
-                  <div
-                    key={staff.id}
-                    className="col"
-                    data-staff={staff.id}
-                    style={{ height }}
-                    onClick={(event) => {
-                      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                      const minute = dayStart + Math.round((event.clientY - rect.top) / px / 5) * 5;
-                      setSeed({ staffId: staff.id, startMin: minute, date });
-                    }}
-                  >
-                    {hours.map((minute) => (
-                      <div key={minute} className="hour-line" style={{ top: (minute - dayStart) * px }}>
-                        {staff.id === visibleStaff[0].id && <span>{`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}</span>}
+            <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${visibleStaff.length}, minmax(0, 1fr))` }}>
+              <div />
+              {visibleStaff.map((staff) => {
+                const photo = portraitFor(staff.name);
+                return (
+                  <div className="master-head" key={staff.id}>
+                    {photo ? <Image className="face" src={photo} alt="" width={36} height={36} /> : <span className="avatar">{staff.name.slice(0, 1)}</span>}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <strong>{staff.name}</strong>
+                      <div className="load" aria-label={`Загрузка ${staff.loadPercent}%`}>
+                        <i><span style={{ width: `${Math.min(100, staff.loadPercent)}%` }} /></i>
+                        <em>{staff.loadPercent}%</em>
                       </div>
-                    ))}
-                    {staff.intervals.filter((interval) => interval.kind === "break").map((interval) => (
-                      <div key={`${interval.startMin}-b`} className="off-zone" style={{ top: (interval.startMin - dayStart) * px, height: (interval.endMin - interval.startMin) * px }} />
-                    ))}
-                    {staff.dayOff && <div className="off-zone" style={{ top: 0, height }} />}
-                    {journal.appointments.filter((appt) => appt.staffId === staff.id).map((appt) => {
-                      const preview = drag?.id === appt.id && drag.active ? drag : null;
-                      const start = preview && preview.previewStaff === staff.id ? preview.previewStart : appt.startMin;
-                      const end = preview && preview.previewStaff === staff.id ? preview.previewEnd : appt.endMin;
-                      const movedAway = preview && preview.previewStaff !== staff.id;
-                      return (
-                        <button
-                          key={appt.id}
-                          className={`appt ${appt.status === "cancelled" ? "cancelled" : ""} ${preview ? "preview" : ""} ${preview?.invalid ? "bad" : ""}`}
-                          style={{
-                            top: (start - dayStart) * px,
-                            height: Math.max(28, (end - start) * px - 4),
-                            background: appt.color,
-                            opacity: movedAway ? 0.35 : 1,
-                          }}
-                          onPointerDown={(event) => onBlockPointerDown(event, appt, "move")}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <b>{appt.clientName || "Без имени"} {appt.guest ? "· Гость" : ""}</b>
-                          <small>{appt.services[0]?.title}{appt.services.length > 1 ? ` +${appt.services.length - 1}` : ""}</small>
-                          <div className="meta">{STATUS_LABEL[appt.status]}{appt.paidMinor < appt.priceMinor ? " · не оплачено" : " · оплачено"}{appt.source === "online" ? " · онлайн" : ""}</div>
-                          <span
-                            data-resize="1"
-                            style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }}
-                            onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")}
-                          />
-                        </button>
-                      );
-                    })}
-                    {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
-                      <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: (drag.previewStart - dayStart) * px, height: Math.max(28, (drag.previewEnd - drag.previewStart) * px), background: "#efe7ff" }} />
-                    )}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="gutter" style={{ height, position: "relative" }}>
+                {hours.map((minute) => (
+                  <div key={minute} className="hour-label" style={{ top: (minute - dayStart) * px }}>
+                    {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
                   </div>
                 ))}
+                {showNow && <div className="now-pill" style={{ top: (nowMin - dayStart) * px }}>{`${String(Math.floor(nowMin / 60)).padStart(2, "0")}:${String(nowMin % 60).padStart(2, "0")}`}</div>}
               </div>
+              {visibleStaff.map((staff) => (
+                <div
+                  key={staff.id}
+                  className="day-col"
+                  data-staff={staff.id}
+                  style={{ height }}
+                  onClick={(event) => {
+                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                    const minute = dayStart + Math.round((event.clientY - rect.top) / px / 5) * 5;
+                    setSeed({ staffId: staff.id, startMin: minute, date });
+                  }}
+                >
+                  {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: (minute - dayStart) * px }} />)}
+                  {showNow && staff.id === visibleStaff[0].id && (
+                    <div className="now-line" style={{ top: (nowMin - dayStart) * px, left: 0, width: `${visibleStaff.length * 100}%` }} />
+                  )}
+                  {journal.appointments.filter((appt) => appt.staffId === staff.id).map((appt) => {
+                    const preview = drag?.id === appt.id && drag.active ? drag : null;
+                    const start = preview && preview.previewStaff === staff.id ? preview.previewStart : appt.startMin;
+                    const end = preview && preview.previewStaff === staff.id ? preview.previewEnd : appt.endMin;
+                    const movedAway = preview && preview.previewStaff !== staff.id;
+                    const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+                    return (
+                      <button
+                        key={appt.id}
+                        className={`appt ${appt.status === "cancelled" ? "cancelled" : ""} ${preview ? "preview" : ""} ${preview?.invalid ? "bad" : ""}`}
+                        style={{
+                          top: (start - dayStart) * px,
+                          height: Math.max(36, (end - start) * px - 6),
+                          background: `linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)), ${appt.color}`,
+                          borderLeft: "3px solid rgba(80, 30, 70, 0.18)",
+                          opacity: movedAway ? 0.35 : 1,
+                        }}
+                        onPointerDown={(event) => onBlockPointerDown(event, appt, "move")}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <span className="when">{hh(start)}–{hh(end)}</span>
+                        <b>{appt.clientName || "Без имени"}</b>
+                        <small>{appt.services[0]?.title}{appt.services.length > 1 ? ` +${appt.services.length - 1}` : ""}</small>
+                        {appt.source === "online" && <span className="ai-badge">AI</span>}
+                        <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
+                      </button>
+                    );
+                  })}
+                  {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
+                    <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: (drag.previewStart - dayStart) * px, height: Math.max(36, (drag.previewEnd - drag.previewStart) * px), background: "#efe7ff" }} />
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

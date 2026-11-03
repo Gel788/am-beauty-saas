@@ -48,6 +48,36 @@ export async function dashboard(ctx: Ctx, branchId: string) {
   if (ctx.actor.role !== "accountant" && ctx.actor.role !== "client") {
     journal = await getJournal(ctx, { branchId, date: today });
   }
+  const repeat = await one<{ s: number }>(
+    ctx.db,
+    `SELECT COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE n > 1) / NULLIF(COUNT(*), 0)), 0)::int AS s
+     FROM (
+       SELECT client_id, COUNT(*) AS n
+       FROM appointments
+       WHERE branch_id = $1 AND status <> 'cancelled' AND client_id IS NOT NULL
+       GROUP BY client_id
+     ) visits`,
+    [branchId],
+  );
+  const dormant = await one<{ s: number }>(
+    ctx.db,
+    `SELECT COUNT(*)::int AS s FROM clients c
+     WHERE c.deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM appointments a
+         WHERE a.client_id = c.id AND a.branch_id = $1 AND a.status <> 'cancelled'
+           AND a.starts_at >= $2
+       )`,
+    [branchId, new Date(ctx.now.getTime() - 45 * 86400000).toISOString()],
+  );
+  const checks = await one<{ n: number; total: number }>(
+    ctx.db,
+    `SELECT COUNT(*)::int AS n, COALESCE(SUM(total_minor), 0)::int AS total
+     FROM payments
+     WHERE branch_id = $1 AND status = 'posted' AND direction = 'in'
+       AND posted_at >= $2 AND posted_at < $3`,
+    [branchId, range.start.toISOString(), monthEnd.toISOString()],
+  );
   const todayPaid = await one<{ s: number }>(
     ctx.db,
     `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
@@ -62,6 +92,9 @@ export async function dashboard(ctx: Ctx, branchId: string) {
     branchName: branch.name,
     monthRevenueMinor: Number(revenue?.s ?? 0),
     todayPaidMinor: Number(todayPaid?.s ?? 0),
+    repeatPercent: Number(repeat?.s ?? 0),
+    dormantClients: Number(dormant?.s ?? 0),
+    averageCheckMinor: Number(checks?.n ?? 0) > 0 ? Math.round(Number(checks?.total ?? 0) / Number(checks?.n)) : 0,
     series: series.map((row) => ({ day: row.day, totalMinor: Number(row.total) })),
     topServices: top.map((row) => ({ title: row.title, totalMinor: Number(row.total), visits: Number(row.visits) })),
     journal: journal
