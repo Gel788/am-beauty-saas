@@ -16,9 +16,9 @@ ALTER TABLE branches
 
 CREATE TABLE fiscal_receipts (
   id uuid PRIMARY KEY,
-  tenant_id uuid NOT NULL REFERENCES tenants(id),
-  branch_id uuid NOT NULL REFERENCES branches(id),
-  payment_id uuid NOT NULL REFERENCES payments(id),
+  tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch_id uuid NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  payment_id uuid NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
   -- sell = приход, sell_refund = возврат прихода
   kind text NOT NULL CHECK (kind IN ('sell', 'sell_refund')),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'done', 'failed', 'canceled')),
@@ -44,10 +44,10 @@ CREATE INDEX fiscal_receipts_branch ON fiscal_receipts (branch_id, created_at DE
 
 CREATE TABLE online_payments (
   id uuid PRIMARY KEY,
-  tenant_id uuid NOT NULL REFERENCES tenants(id),
-  branch_id uuid NOT NULL REFERENCES branches(id),
-  appointment_id uuid REFERENCES appointments(id),
-  client_id uuid REFERENCES clients(id),
+  tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch_id uuid NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  appointment_id uuid REFERENCES appointments(id) ON DELETE CASCADE,
+  client_id uuid REFERENCES clients(id) ON DELETE SET NULL,
   purpose text NOT NULL CHECK (purpose IN ('deposit', 'visit')),
   amount_minor int NOT NULL CHECK (amount_minor > 0),
   description text NOT NULL,
@@ -57,7 +57,7 @@ CREATE TABLE online_payments (
   confirmation_url text,
   method text CHECK (method IN ('card', 'sbp')),
   token_hash text NOT NULL UNIQUE,
-  payment_id uuid REFERENCES payments(id),
+  payment_id uuid REFERENCES payments(id) ON DELETE SET NULL,
   error text,
   created_by uuid NOT NULL,
   expires_at timestamptz NOT NULL,
