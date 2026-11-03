@@ -17,6 +17,7 @@ import { many, one } from "./db";
 import { loadWorkingIntervals } from "./hours";
 import { LIVE_PAYMENT, NET_AMOUNT, clearAppointmentDebt, syncAppointmentDebt } from "./payments";
 import type { BranchRow, Ctx } from "./types";
+import { consumeForAppointment } from "./inventory";
 
 type ServiceInput = { serviceId: string; durationMin?: number };
 
@@ -744,6 +745,8 @@ export async function changeStatus(
     if (ctx.now.getTime() < readyAt) throw new AppError("VALIDATION", "Ещё не прошло время ожидания");
   }
   const action = status === "completed" ? "appointment.completed" : status === "no_show" ? "appointment.no_show" : "appointment.status";
+  // INV-CONSUME-01: materials go out with the completion; policy `block` refuses it when stock is short.
+  const stockWarnings = status === "completed" ? await consumeForAppointment(ctx, id, branch) : [];
   await ctx.db.query(
     `UPDATE appointments SET status = $2, version = version + 1, updated_by = $3, updated_at = now() WHERE id = $1`,
     [id, status, ctx.actor.userId],
@@ -759,6 +762,7 @@ export async function changeStatus(
   return {
     ...fresh,
     paymentSuggested: status === "completed" && branch.require_payment_on_complete && fresh.paidMinor < fresh.priceMinor,
+    stockWarnings,
   };
 }
 

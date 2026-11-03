@@ -47,6 +47,7 @@ type Rule = {
   periodUnit: "month" | "biweekly" | "week";
   base: string;
   includeTips: boolean;
+  deductMaterials?: boolean;
   validFrom: string;
   validTo: string | null;
 };
@@ -93,7 +94,8 @@ function rateLabel(line: Line, money: (n: number) => string) {
   const rate = line.rate as { scheme?: string; percentBps?: number; fixedMinor?: number };
   if (line.type !== "service") return "";
   if (rate.scheme === "fixed_per_service") return `фикс ${money(Number(rate.fixedMinor ?? 0))}`;
-  return `${Number(rate.percentBps ?? 0) / 100}% от ${money(line.baseAmountMinor)}`;
+  const materials = Number((line.rate as { materialsMinor?: number }).materialsMinor ?? 0);
+  return `${Number(rate.percentBps ?? 0) / 100}% от ${money(line.baseAmountMinor)}${materials ? ` (материалы −${money(materials)})` : ""}`;
 }
 
 export function PayrollView() {
@@ -400,6 +402,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
     periodUnit: "month" as Rule["periodUnit"],
     base: "service_price",
     includeTips: true,
+    deductMaterials: false,
     validFrom: new Date().toISOString().slice(0, 10),
   });
 
@@ -437,6 +440,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
           periodUnit: form.periodUnit,
           base: form.base,
           includeTips: form.includeTips,
+          deductMaterials: withPercent && form.deductMaterials,
           validFrom: form.validFrom,
         }),
       });
@@ -462,6 +466,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
     if (rule.scheme === "percent" || rule.scheme === "hybrid") parts.push(`${rule.percentBps / 100}% ${rule.base === "paid_amount" ? "от оплаченного" : "от цены"}`);
     if (rule.scheme === "fixed_per_service") parts.push(`${money(rule.fixedMinor)} за услугу`);
     if (rule.scheme === "salary" || rule.scheme === "hybrid") parts.push(`оклад ${money(rule.salaryMinor)} ${UNITS[rule.periodUnit]}`);
+    if (rule.deductMaterials) parts.push("за вычетом материалов");
     if (!rule.includeTips) parts.push("без чаевых");
     return parts.join(", ");
   }
@@ -504,6 +509,9 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
                 {Object.entries(UNITS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </>
+          )}
+          {withPercent && (
+            <label className="row"><input type="checkbox" checked={form.deductMaterials} onChange={(event) => setForm({ ...form, deductMaterials: event.target.checked })} /> минус материалы</label>
           )}
           <label className="row"><input type="checkbox" checked={form.includeTips} onChange={(event) => setForm({ ...form, includeTips: event.target.checked })} /> чаевые мастеру</label>
           <span className="muted">с</span>

@@ -484,18 +484,60 @@ function ZReport({ report, onClose, onChanged }: { report: Report; onClose: () =
   );
 }
 
+type SaleItem = { id: string; title: string; sellPriceMinor: number; forSale: boolean; active: boolean; trackStock: boolean; qty: number };
+
 function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
+  const [mode, setMode] = useState<"goods" | "free">("goods");
+  const [goods, setGoods] = useState<SaleItem[]>([]);
+  const [itemId, setItemId] = useState("");
+  const [qty, setQty] = useState("1");
   const [title, setTitle] = useState("");
   const [rub, setRub] = useState("");
   const [method, setMethod] = useState<Method>("cash");
   const [busy, setBusy] = useState(false);
-  const amount = parseRub(rub || "0");
+  useEffect(() => {
+    api<SaleItem[]>(`/api/inventory/items?branchId=${branchId}`)
+      .then((items) => {
+        const forSale = items.filter((item) => item.forSale && item.active);
+        setGoods(forSale);
+        if (!forSale.length) setMode("free");
+      })
+      .catch(() => setMode("free"));
+  }, [branchId]);
+  const item = goods.find((entry) => entry.id === itemId);
+  const count = Number(qty.replace(",", ".")) || 0;
+  const amount = mode === "goods" ? (item ? Math.round(item.sellPriceMinor * count) : 0) : parseRub(rub || "0");
   return (
     <Modal title="Приход без записи" onClose={onClose}>
       <div className="list">
-        <div className="field"><label>Что продали</label><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, шампунь" autoFocus /></div>
-        <div className="field"><label>Сумма, ₽</label><input inputMode="decimal" value={rub} onChange={(event) => setRub(event.target.value)} /></div>
+        {goods.length > 0 && (
+          <div className="segment">
+            <button type="button" className={mode === "goods" ? "on" : ""} onClick={() => setMode("goods")}>Товар со склада</button>
+            <button type="button" className={mode === "free" ? "on" : ""} onClick={() => setMode("free")}>Своя сумма</button>
+          </div>
+        )}
+        {mode === "goods" ? (
+          <>
+            <div className="field">
+              <label>Товар</label>
+              <select value={itemId} onChange={(event) => setItemId(event.target.value)} autoFocus>
+                <option value="">Выберите товар</option>
+                {goods.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.title} · {formatMoney(entry.sellPriceMinor)}{entry.trackStock ? ` · в наличии ${entry.qty}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field"><label>Количество</label><input inputMode="decimal" value={qty} onChange={(event) => setQty(event.target.value)} /></div>
+          </>
+        ) : (
+          <>
+            <div className="field"><label>Что продали</label><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, шампунь" autoFocus /></div>
+            <div className="field"><label>Сумма, ₽</label><input inputMode="decimal" value={rub} onChange={(event) => setRub(event.target.value)} /></div>
+          </>
+        )}
         <div className="segment">
           {METHODS.map(({ id }) => (
             <button key={id} type="button" className={method === id ? "on" : ""} onClick={() => setMethod(id)}>{METHOD_LABEL[id]}</button>
@@ -510,11 +552,12 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
             onClick={async () => {
               setBusy(true);
               try {
-                await api("/api/payments", {
-                  method: "POST",
-                  body: JSON.stringify({ branchId, kind: "misc", title, tenders: [{ method, amountMinor: amount }] }),
-                });
-                toast("Приход проведён");
+                const body =
+                  mode === "goods"
+                    ? { branchId, kind: "misc", items: [{ itemId, qty: count }], tenders: [{ method, amountMinor: amount }] }
+                    : { branchId, kind: "misc", title, tenders: [{ method, amountMinor: amount }] };
+                await api("/api/payments", { method: "POST", body: JSON.stringify(body) });
+                toast(mode === "goods" ? "Продажа проведена, остаток списан" : "Приход проведён");
                 onDone();
               } catch (err) {
                 toast((err as ApiError).message, "error");

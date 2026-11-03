@@ -200,7 +200,7 @@ export function RecordDrawer({
   async function setVisitStatus(next: string) {
     if (!seed.id) return;
     try {
-      const updated = await api<{ version: number; status: AppointmentStatus; paymentSuggested?: boolean }>(`/api/appointments/${seed.id}/status`, {
+      const updated = await api<{ version: number; status: AppointmentStatus; paymentSuggested?: boolean; stockWarnings?: { title: string; neededQty: number; availableQty: number }[] }>(`/api/appointments/${seed.id}/status`, {
         method: "POST",
         body: JSON.stringify({ status: next, version, acknowledgeSoft: true }),
       });
@@ -210,6 +210,9 @@ export function RecordDrawer({
         setTab("pay");
         toast("Визит завершён. Можно принять оплату");
       } else toast(STATUS_LABEL[updated.status]);
+      if (updated.stockWarnings?.length) {
+        toast(`Материалы ушли в минус: ${updated.stockWarnings.map((w) => `${w.title} (нужно ${w.neededQty}, было ${w.availableQty})`).join(", ")}`, "error");
+      }
       onSaved();
     } catch (error) {
       toast((error as ApiError).message, "error");

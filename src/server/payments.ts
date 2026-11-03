@@ -3,6 +3,7 @@ import { audit } from "./audit";
 import { isAdminPlus, loadBranch } from "./access";
 import { one } from "./db";
 import type { Ctx } from "./types";
+import { afterPaymentPosted, productLines } from "./inventory";
 
 type TenderInput = { method: "cash" | "card" | "sbp" | "transfer" | "bonus" | "certificate"; amountMinor: number };
 
@@ -156,6 +157,8 @@ export async function createPayment(
     title?: string;
     bypassShift?: boolean;
     acknowledgePartial?: boolean;
+    /** INV-SALE-01: goods sold through the till (kind misc). */
+    items?: { itemId: string; qty: unknown; priceMinor?: number }[];
   },
 ) {
   const kind = input.kind ?? (input.appointmentId ? "visit" : "misc");
@@ -179,7 +182,7 @@ export async function createPayment(
 
   let clientId = input.clientId ?? null;
   const appointmentId = input.appointmentId ?? null;
-  const lines: { type: string; refId: string | null; title: string; amountMinor: number }[] = [];
+  const lines: PaymentLineInput[] = [];
 
   if (kind === "debt") {
     if (!clientId) throw new AppError("VALIDATION", "Укажите клиента");
@@ -193,6 +196,26 @@ export async function createPayment(
       throw new AppError("VALIDATION", "Сумма больше долга клиента");
     }
     lines.push({ type: "debt", refId: clientId, title: "Погашение долга", amountMinor: handed });
+  } else if (kind === "misc" && input.items?.length) {
+    lines.push(...(await productLines(ctx, input.branchId, input.items)));
+    const goods = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+    if (tipMinor > 0) lines.push({ type: "tip", refId: null, title: "Чаевые", amountMinor: tipMinor });
+    const bill = goods + tipMinor;
+    if (handed < bill) throw new AppError("VALIDATION", "Внесено меньше суммы чека");
+    const change = handed - bill;
+    const cashHanded = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
+    if (change > cashHanded) throw new AppError("VALIDATION", "Сдача возможна только с наличных. Уменьшите сумму карты");
+    const sale = await insertPayment(ctx, {
+      branchId: input.branchId,
+      appointmentId: null,
+      clientId,
+      shiftId,
+      total: bill,
+      change,
+      lines,
+      tenders: storedTenders(input.tenders, change),
+    });
+    return { ...sale, partial: false };
   } else if (kind === "misc") {
     lines.push({
       type: "product",
@@ -357,6 +380,8 @@ export type PaymentLineInput = {
   title: string;
   amountMinor: number;
   refundOfLineId?: string | null;
+  itemId?: string | null;
+  qty?: number | null;
 };
 
 export async function insertPayment(
@@ -403,8 +428,8 @@ export async function insertPayment(
   );
   for (const line of input.lines) {
     await ctx.db.query(
-      `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, ref_id, title, amount_minor, refund_of_line_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, ref_id, title, amount_minor, refund_of_line_id, item_id, qty)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         crypto.randomUUID(),
         ctx.actor.tenantId,
@@ -414,6 +439,8 @@ export async function insertPayment(
         line.title,
         line.amountMinor,
         line.refundOfLineId ?? null,
+        line.itemId ?? null,
+        line.qty == null ? null : line.qty.toFixed(3),
       ],
     );
   }
@@ -424,6 +451,7 @@ export async function insertPayment(
       [crypto.randomUUID(), ctx.actor.tenantId, id, tender.method, tender.amountMinor],
     );
   }
+  await afterPaymentPosted(ctx, id);
   if (direction === "in") {
     await audit(ctx, {
       branchId: input.branchId,

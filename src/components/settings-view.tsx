@@ -31,6 +31,8 @@ type Branch = {
   onlineAccent: string;
   reminderEnabled: boolean;
   reminderHours: number;
+  consumePolicy: "warn" | "block";
+  allowNegativeStock: boolean;
 };
 
 export function SettingsView() {
@@ -73,6 +75,7 @@ export function SettingsView() {
       </form>
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
       <ReminderSettings branch={branch} onSaved={setBranch} />
+      <StockSettings branch={branch} onSaved={setBranch} />
     </>
   );
 }
@@ -150,6 +153,41 @@ function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (
 }
 
 type Message = { id: string; channel: string; recipient: string; body: string; status: string; error: string | null; createdAt: string; clientName: string | null };
+
+function StockSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
+  const toast = useToast();
+  const [policy, setPolicy] = useState(branch.consumePolicy);
+  const [negative, setNegative] = useState(branch.allowNegativeStock);
+  useEffect(() => {
+    setPolicy(branch.consumePolicy);
+    setNegative(branch.allowNegativeStock);
+  }, [branch]);
+  return (
+    <form
+      className="panel list"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        try {
+          onSaved(await api<Branch>(`/api/branches/${branch.id}`, { method: "PATCH", body: JSON.stringify({ consumePolicy: policy, allowNegativeStock: negative }) }));
+          toast("Настройки склада сохранены");
+        } catch (error) {
+          toast((error as ApiError).message, "error");
+        }
+      }}
+    >
+      <h2 style={{ margin: 0 }}>Склад</h2>
+      <div className="field">
+        <label>Если на завершение визита не хватает материалов</label>
+        <select value={policy} onChange={(event) => setPolicy(event.target.value as Branch["consumePolicy"])}>
+          <option value="warn">Завершить и предупредить (остаток уйдёт в минус)</option>
+          <option value="block">Не давать завершить визит</option>
+        </select>
+      </div>
+      <label className="row"><input type="checkbox" checked={negative} onChange={(event) => setNegative(event.target.checked)} /> Разрешить списание, продажу и перемещение в минус</label>
+      <button className="btn-gradient" type="submit">Сохранить склад</button>
+    </form>
+  );
+}
 
 function ReminderSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
   const toast = useToast();

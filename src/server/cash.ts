@@ -6,6 +6,7 @@ import { loadBranch } from "./access";
 import { many, one } from "./db";
 import { LIVE_PAYMENT, assertMoney, insertPayment, requireShift, syncAppointmentDebt, type PaymentLineInput } from "./payments";
 import type { Ctx } from "./types";
+import { afterPaymentVoided } from "./inventory";
 
 const CASH_ROLES = ["owner", "admin", "accountant", "super"];
 const METHODS = ["cash", "card", "sbp", "transfer"] as const;
@@ -506,9 +507,9 @@ export async function refundPayment(
   const { shiftId } = await requireShift(ctx, original.branch_id);
   if (!shiftId) throw new AppError("SHIFT_REQUIRED", "Сначала откройте смену", { branchId: original.branch_id });
 
-  const lines = await many<{ id: string; line_type: string; ref_id: string | null; title: string; amount_minor: number }>(
+  const lines = await many<{ id: string; line_type: string; ref_id: string | null; title: string; amount_minor: number; item_id: string | null; qty: string | null }>(
     ctx.db,
-    "SELECT id, line_type, ref_id, title, amount_minor FROM payment_lines WHERE payment_id = $1",
+    "SELECT id, line_type, ref_id, title, amount_minor, item_id, qty FROM payment_lines WHERE payment_id = $1",
     [paymentId],
   );
   const refundedLines = await many<{ refund_of_line_id: string; s: number }>(
@@ -534,7 +535,7 @@ export async function refundPayment(
       if (item.amountMinor > (lineLeft.get(line.id) ?? 0)) {
         throw new AppError("VALIDATION", `Возврат по «${line.title}» больше оплаченного`);
       }
-      refundLines.push({ type: line.line_type, refId: line.ref_id, title: line.title, amountMinor: item.amountMinor, refundOfLineId: line.id });
+      refundLines.push({ type: line.line_type, refId: line.ref_id, title: line.title, amountMinor: item.amountMinor, refundOfLineId: line.id, ...goodsBack(line, item.amountMinor) });
     }
   } else {
     const wanted = input.amountMinor ?? remaining;
@@ -547,7 +548,7 @@ export async function refundPayment(
       if (left <= 0) break;
       const take = Math.min(left, Math.max(0, lineLeft.get(line.id) ?? 0));
       if (take <= 0) continue;
-      refundLines.push({ type: line.line_type, refId: line.ref_id, title: line.title, amountMinor: take, refundOfLineId: line.id });
+      refundLines.push({ type: line.line_type, refId: line.ref_id, title: line.title, amountMinor: take, refundOfLineId: line.id, ...goodsBack(line, take) });
       left -= take;
     }
   }
@@ -647,6 +648,13 @@ export async function refundPayment(
   };
 }
 
+/** A refunded product line returns its share of the goods to stock (INV-SALE-01). */
+function goodsBack(line: { item_id: string | null; qty: string | null; amount_minor: number }, amount: number) {
+  if (!line.item_id || !line.qty || !Number(line.amount_minor)) return {};
+  const qty = Math.round(((Number(line.qty) * amount) / Number(line.amount_minor)) * 1000) / 1000;
+  return qty > 0 ? { itemId: line.item_id, qty } : {};
+}
+
 /** PAY-VOID-01: P1 voids only cash payments of the still-open shift; anything else is a refund. */
 export async function voidPayment(ctx: Ctx, paymentId: string, input: { reason?: string } = {}) {
   assertCashRole(ctx);
@@ -685,6 +693,7 @@ export async function voidPayment(ctx: Ctx, paymentId: string, input: { reason?:
       Number(debt?.s),
     ]);
   }
+  await afterPaymentVoided(ctx, paymentId);
   const synced = await afterMoneyChange(ctx, original.appointment_id);
   await audit(ctx, {
     branchId: original.branch_id,

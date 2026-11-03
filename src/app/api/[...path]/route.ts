@@ -69,6 +69,24 @@ import {
   updateRule,
 } from "@/server/payroll";
 import {
+  applyCount,
+  cancelCount,
+  createItem,
+  deleteItem,
+  getConsumables,
+  getCount,
+  listCounts,
+  listItems,
+  listMovements,
+  receiveStock,
+  setConsumables,
+  setCounted,
+  startCount,
+  transferStock,
+  updateItem,
+  writeOffStock,
+} from "@/server/inventory";
+import {
   asOnline,
   cancelBooking,
   confirmBooking,
@@ -194,6 +212,62 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "GET reports/day") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dayReport(ctx, branchId, url.searchParams.get("date") ?? "")));
+  }
+  if (parts[0] === "inventory") {
+    const [, kind, id, action] = parts;
+    const branchFrom = (value: unknown) => resolveBranch(actor, (value as string) || url.searchParams.get("branchId"));
+    if (kind === "items" && !id && method === "GET") {
+      const branchId = await branchFrom(null);
+      return NextResponse.json(await run((ctx) => listItems(ctx, branchId, { includeArchived: url.searchParams.get("archived") === "1" })));
+    }
+    if (kind === "items" && !id && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => createItem(ctx, body as never)));
+    }
+    if (kind === "items" && id && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => updateItem(ctx, id, body as never)));
+    }
+    if (kind === "items" && id && method === "DELETE") return NextResponse.json(await run((ctx) => deleteItem(ctx, id)));
+    if (kind === "movements" && method === "GET") {
+      const branchId = await branchFrom(null);
+      return NextResponse.json(
+        await run((ctx) =>
+          listMovements(ctx, branchId, { itemId: url.searchParams.get("itemId") || undefined, type: url.searchParams.get("type") || undefined }),
+        ),
+      );
+    }
+    if (method === "POST" && (kind === "receipt" || kind === "write-off")) {
+      const body = await readJson(request);
+      const branchId = await branchFrom(body.branchId);
+      if (kind === "receipt") return NextResponse.json(await run((ctx) => receiveStock(ctx, { ...body, branchId } as never)));
+      return NextResponse.json(await run((ctx) => writeOffStock(ctx, { ...body, branchId } as never)));
+    }
+    if (kind === "transfer" && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => transferStock(ctx, body as never)));
+    }
+    if (kind === "consumables" && id && method === "GET") return NextResponse.json(await run((ctx) => getConsumables(ctx, id)));
+    if (kind === "consumables" && id && method === "PUT") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => setConsumables(ctx, id, (body.lines as never) ?? [])));
+    }
+    if (kind === "counts" && !id && method === "GET") {
+      const branchId = await branchFrom(null);
+      return NextResponse.json(await run((ctx) => listCounts(ctx, branchId)));
+    }
+    if (kind === "counts" && !id && method === "POST") {
+      const body = await readJson(request);
+      const branchId = await branchFrom(body.branchId);
+      return NextResponse.json(await run((ctx) => startCount(ctx, { branchId, note: body.note as string | undefined })));
+    }
+    if (kind === "counts" && id && !action && method === "GET") return NextResponse.json(await run((ctx) => getCount(ctx, id)));
+    if (kind === "counts" && id && action === "lines" && method === "PUT") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => setCounted(ctx, id, (body.lines as never) ?? [])));
+    }
+    if (kind === "counts" && id && action === "apply" && method === "POST") return NextResponse.json(await run((ctx) => applyCount(ctx, id)));
+    if (kind === "counts" && id && action === "cancel" && method === "POST") return NextResponse.json(await run((ctx) => cancelCount(ctx, id)));
   }
   if (parts[0] === "payroll") {
     const [, kind, id, action, sub] = parts;

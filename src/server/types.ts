@@ -55,6 +55,8 @@ export type BranchRow = {
   quiet_start_min: number;
   quiet_end_min: number;
   accrue_on_complete_unpaid: boolean;
+  consume_policy: "warn" | "block";
+  allow_negative_stock: boolean;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

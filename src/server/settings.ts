@@ -45,6 +45,8 @@ export function presentBranch(branch: BranchRow) {
     reminderEnabled: branch.reminder_enabled,
     reminderHours: Number(branch.reminder_hours),
     accrueOnCompleteUnpaid: branch.accrue_on_complete_unpaid,
+    consumePolicy: branch.consume_policy,
+    allowNegativeStock: branch.allow_negative_stock,
   };
 }
 
@@ -96,6 +98,8 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     reminderEnabled: "reminder_enabled",
     reminderHours: "reminder_hours",
     accrueOnCompleteUnpaid: "accrue_on_complete_unpaid",
+    consumePolicy: "consume_policy",
+    allowNegativeStock: "allow_negative_stock",
   };
   for (const [key, [min, max, message]] of Object.entries(INT_FIELDS)) {
     if (input[key] === undefined) continue;
@@ -107,6 +111,9 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
   }
   if (input.onlineAccent !== undefined && !/^#[0-9a-fA-F]{6}$/.test(String(input.onlineAccent))) {
     throw new AppError("VALIDATION", "Цвет — в формате #RRGGBB");
+  }
+  if (input.consumePolicy !== undefined && !["warn", "block"].includes(String(input.consumePolicy))) {
+    throw new AppError("VALIDATION", "Политика списания: предупреждать или запрещать");
   }
   if (input.slug !== undefined) input.slug = String(input.slug).trim().toLowerCase();
   const sets: string[] = [];

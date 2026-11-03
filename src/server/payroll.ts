@@ -3,6 +3,7 @@ import { addCalendarDays, formatLocalDate, localDayUtcRange } from "@/domain/tim
 import { isAdminPlus, loadBranch } from "./access";
 import { audit } from "./audit";
 import { many, one } from "./db";
+import { materialsCost } from "./inventory";
 import type { Ctx } from "./types";
 
 type Scheme = "percent" | "fixed_per_service" | "salary" | "hybrid";
@@ -20,6 +21,7 @@ type RuleRow = {
   period_unit: "month" | "biweekly" | "week";
   base: Base;
   include_tips: boolean;
+  deduct_materials: boolean;
   valid_from: string;
   valid_to: string | null;
 };
@@ -94,6 +96,7 @@ function presentRule(row: RuleRow) {
     periodUnit: row.period_unit,
     base: row.base,
     includeTips: row.include_tips,
+    deductMaterials: row.deduct_materials,
     validFrom: toDate(row.valid_from),
     validTo: row.valid_to ? toDate(row.valid_to) : null,
   };
@@ -115,6 +118,7 @@ type RuleInput = {
   periodUnit?: "month" | "biweekly" | "week";
   base?: Base;
   includeTips?: boolean;
+  deductMaterials?: boolean;
   validFrom: string;
   validTo?: string | null;
 };
@@ -160,8 +164,8 @@ export async function createRule(ctx: Ctx, input: RuleInput) {
   }
   const id = crypto.randomUUID();
   await ctx.db.query(
-    `INSERT INTO payroll_rules (id, tenant_id, staff_id, service_id, scheme, percent_bps, fixed_minor, salary_minor, period_unit, base, include_tips, valid_from, valid_to)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO payroll_rules (id, tenant_id, staff_id, service_id, scheme, percent_bps, fixed_minor, salary_minor, period_unit, base, include_tips, valid_from, valid_to, deduct_materials)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [
       id,
       ctx.actor.tenantId,
@@ -176,6 +180,7 @@ export async function createRule(ctx: Ctx, input: RuleInput) {
       input.includeTips ?? true,
       from,
       to,
+      input.deductMaterials ?? false,
     ],
   );
   await audit(ctx, { entity: "payroll_rule", entityId: id, action: "payroll.rule_created", diff: input });
@@ -194,7 +199,7 @@ export async function updateRule(ctx: Ctx, id: string, input: RuleInput) {
   }
   await ctx.db.query(
     `UPDATE payroll_rules SET staff_id = $2, service_id = $3, scheme = $4, percent_bps = $5, fixed_minor = $6, salary_minor = $7,
-       period_unit = $8, base = $9, include_tips = $10, valid_from = $11, valid_to = $12 WHERE id = $1`,
+       period_unit = $8, base = $9, include_tips = $10, valid_from = $11, valid_to = $12, deduct_materials = $13 WHERE id = $1`,
     [
       id,
       merged.staffId ?? null,
@@ -208,6 +213,7 @@ export async function updateRule(ctx: Ctx, id: string, input: RuleInput) {
       merged.includeTips ?? true,
       from,
       to,
+      merged.deductMaterials ?? false,
     ],
   );
   await audit(ctx, { entity: "payroll_rule", entityId: id, action: "payroll.rule_updated", diff: { before: presentRule(existing), after: merged } });
@@ -400,7 +406,9 @@ export async function getPeriod(ctx: Ctx, id: string) {
 
 /** The master sees the rate applied to their own line, not anything about other rules. */
 function pickRate(snapshot: Record<string, unknown>) {
-  return { scheme: snapshot.scheme, percentBps: snapshot.percentBps, fixedMinor: snapshot.fixedMinor };
+  const rate: Record<string, unknown> = { scheme: snapshot.scheme, percentBps: snapshot.percentBps, fixedMinor: snapshot.fixedMinor };
+  if (snapshot.materialsMinor !== undefined) rate.materialsMinor = snapshot.materialsMinor;
+  return rate;
 }
 
 async function ensureItem(ctx: Ctx, periodId: string, staffId: string) {
@@ -486,6 +494,7 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
      ORDER BY a.completed_at, s.position`,
     [branch.id, from, to],
   );
+  const materials = await materialsCost(ctx, services.map((row) => row.appointment_service_id));
   const unpaidWarned = new Set<string>();
   for (const row of services) {
     const date = formatLocalDate(new Date(row.completed_at), tz);
@@ -509,7 +518,10 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
       continue;
     }
     if (rule.scheme === "salary") continue;
-    const base = rule.base === "paid_amount" ? paid : price;
+    const gross = rule.base === "paid_amount" ? paid : price;
+    // PAYROLL-SCHEME-05: the cost of materials comes off the base, never below zero.
+    const materialsMinor = rule.deduct_materials ? (materials.get(row.appointment_service_id) ?? 0) : 0;
+    const base = Math.max(0, gross - materialsMinor);
     const result =
       rule.scheme === "fixed_per_service" ? Number(rule.fixed_minor) : Math.round((base * Number(rule.percent_bps)) / 10000);
     push(row.staff_id, {
@@ -521,7 +533,13 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
       title: row.title,
       occurredOn: date,
       baseAmountMinor: base,
-      rateSnapshot: { scheme: rule.scheme, percentBps: Number(rule.percent_bps), fixedMinor: Number(rule.fixed_minor), base: rule.base },
+      rateSnapshot: {
+        scheme: rule.scheme,
+        percentBps: Number(rule.percent_bps),
+        fixedMinor: Number(rule.fixed_minor),
+        base: rule.base,
+        ...(rule.deduct_materials ? { grossMinor: gross, materialsMinor } : {}),
+      },
       resultMinor: result,
     });
   }
