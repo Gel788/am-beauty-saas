@@ -54,6 +54,7 @@ export type BranchRow = {
   reminder_hours: number;
   quiet_start_min: number;
   quiet_end_min: number;
+  accrue_on_complete_unpaid: boolean;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

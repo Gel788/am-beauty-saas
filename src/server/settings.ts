@@ -44,6 +44,7 @@ export function presentBranch(branch: BranchRow) {
     onlineAccent: branch.online_accent,
     reminderEnabled: branch.reminder_enabled,
     reminderHours: Number(branch.reminder_hours),
+    accrueOnCompleteUnpaid: branch.accrue_on_complete_unpaid,
   };
 }
 
@@ -94,6 +95,7 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     onlineAccent: "online_accent",
     reminderEnabled: "reminder_enabled",
     reminderHours: "reminder_hours",
+    accrueOnCompleteUnpaid: "accrue_on_complete_unpaid",
   };
   for (const [key, [min, max, message]] of Object.entries(INT_FIELDS)) {
     if (input[key] === undefined) continue;

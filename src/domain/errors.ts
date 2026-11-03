@@ -44,6 +44,9 @@ export function mapPgError(error: unknown): unknown {
   if (pg?.code === "23514" && (pg.constraint === "tenants_slug_format" || pg.constraint === "branches_slug_format")) {
     return new AppError("VALIDATION", "Адрес: латиница, цифры и дефис, от 2 символов");
   }
+  if (pg?.code === "23P01" && pg.constraint === "payroll_periods_no_overlap") {
+    return new AppError("VALIDATION", "Период пересекается с другим периодом филиала");
+  }
   if (pg?.code === "22P02") {
     return new AppError("NOT_FOUND", "Не найдено");
   }

@@ -456,3 +456,5 @@ h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spac
   .report-tiles, .report-grid { grid-template-columns: 1fr; }
   .report-table { display: block; overflow-x: auto; }
 }
+.payroll-lines { table-layout: fixed; }
+@media (max-width: 720px) { .payroll-lines { table-layout: auto; } }

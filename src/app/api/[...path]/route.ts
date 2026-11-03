@@ -52,6 +52,23 @@ import { dashboard } from "@/server/dashboard";
 import { dayReport } from "@/server/reports";
 import { listMessages, runReminderJob } from "@/server/reminders";
 import {
+  addManualLine,
+  approvePeriod,
+  calculatePeriod,
+  createPeriod,
+  createRule,
+  deleteRule,
+  getPeriod,
+  listPeriods,
+  listRules,
+  lockPeriod,
+  payPeriod,
+  removeManualLine,
+  setPayrollExclusion,
+  unapprovePeriod,
+  updateRule,
+} from "@/server/payroll";
+import {
   asOnline,
   cancelBooking,
   confirmBooking,
@@ -177,6 +194,49 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "GET reports/day") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dayReport(ctx, branchId, url.searchParams.get("date") ?? "")));
+  }
+  if (parts[0] === "payroll") {
+    const [, kind, id, action, sub] = parts;
+    if (kind === "rules" && !id && method === "GET") return NextResponse.json(await run((ctx) => listRules(ctx)));
+    if (kind === "rules" && !id && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => createRule(ctx, body as never)));
+    }
+    if (kind === "rules" && id && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => updateRule(ctx, id, body as never)));
+    }
+    if (kind === "rules" && id && method === "DELETE") return NextResponse.json(await run((ctx) => deleteRule(ctx, id)));
+    if (kind === "periods" && !id && method === "GET") {
+      const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+      return NextResponse.json(await run((ctx) => listPeriods(ctx, branchId)));
+    }
+    if (kind === "periods" && !id && method === "POST") {
+      const body = await readJson(request);
+      const branchId = await resolveBranch(actor, (body.branchId as string) ?? null);
+      return NextResponse.json(
+        await run((ctx) => createPeriod(ctx, { branchId, startsOn: String(body.startsOn ?? ""), endsOn: String(body.endsOn ?? "") })),
+      );
+    }
+    if (kind === "periods" && id && !action && method === "GET") return NextResponse.json(await run((ctx) => getPeriod(ctx, id)));
+    if (kind === "periods" && id && method === "POST") {
+      const body = await readJson(request);
+      if (action === "calculate") return NextResponse.json(await run((ctx) => calculatePeriod(ctx, id)));
+      if (action === "approve") return NextResponse.json(await run((ctx) => approvePeriod(ctx, id)));
+      if (action === "unapprove") return NextResponse.json(await run((ctx) => unapprovePeriod(ctx, id)));
+      if (action === "lock") return NextResponse.json(await run((ctx) => lockPeriod(ctx, id)));
+      if (action === "pay") return NextResponse.json(await run((ctx) => payPeriod(ctx, id, body as never)));
+      if (action === "lines") return NextResponse.json(await run((ctx) => addManualLine(ctx, id, body as never)));
+    }
+    if (kind === "periods" && id && action === "lines" && sub && method === "DELETE") {
+      return NextResponse.json(await run((ctx) => removeManualLine(ctx, id, sub)));
+    }
+  }
+  if (parts[0] === "appointments" && parts[2] === "payroll-exclusion" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(
+      await run((ctx) => setPayrollExclusion(ctx, parts[1], { exclude: Boolean(body.exclude), reason: body.reason as string | undefined })),
+    );
   }
   if (key === "GET journal") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
