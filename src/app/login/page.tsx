@@ -19,7 +19,8 @@ export default function LoginPage() {
           setError("");
           try {
             await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-            router.push("/journal");
+            const me = await api<{ actor: { role: string } }>("/api/auth/me");
+            router.push(me.actor.role === "accountant" ? "/cash" : "/journal");
           } catch (err) {
             setError(err instanceof Error ? err.message : "Не удалось войти");
           }

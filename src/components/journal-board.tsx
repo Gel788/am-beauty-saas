@@ -411,6 +411,9 @@ export function JournalBoard() {
                     setSeed({ staffId: staff.id, startMin: minute, date });
                   }}
                 >
+                  {offZones(staff, dayStart, dayEnd).map(([from, to]) => (
+                    <div key={`off-${from}`} className="off-zone" style={{ top: `${((from - dayStart) / span) * 100}%`, height: `${((to - from) / span) * 100}%` }} />
+                  ))}
                   {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: `${((minute - dayStart) / span) * 100}%` }} />)}
                   {showNow && staff.id === visibleStaff[0].id && (
                     <div className="now-line" style={{ top: `${((nowMin - dayStart) / span) * 100}%`, left: 0, width: `${visibleStaff.length * 100}%` }} />
@@ -479,4 +482,20 @@ export function JournalBoard() {
       )}
     </>
   );
+}
+
+/** SCH-VIEW-01: grey bands outside working hours and over breaks. Clicks still go through, admins may book there. */
+function offZones(staff: Column, dayStart: number, dayEnd: number): [number, number][] {
+  if (staff.dayOff) return [[dayStart, dayEnd]];
+  const works = staff.intervals.filter((item) => item.kind === "work").sort((a, b) => a.startMin - b.startMin);
+  if (!works.length) return [[dayStart, dayEnd]];
+  const zones: [number, number][] = [];
+  let cursor = dayStart;
+  for (const work of works) {
+    if (work.startMin > cursor) zones.push([cursor, Math.min(work.startMin, dayEnd)]);
+    cursor = Math.max(cursor, work.endMin);
+  }
+  if (cursor < dayEnd) zones.push([cursor, dayEnd]);
+  for (const rest of staff.intervals.filter((item) => item.kind === "break")) zones.push([Math.max(rest.startMin, dayStart), Math.min(rest.endMin, dayEnd)]);
+  return zones.filter(([from, to]) => to > from);
 }

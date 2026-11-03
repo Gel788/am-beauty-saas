@@ -13,19 +13,20 @@ type Me = {
   branches: { id: string; name: string; address: string }[];
 };
 
-const LINKS = [
-  { href: "/journal", label: "Календарь", icon: CalendarDays },
-  { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
-  { href: "/clients", label: "Клиенты", icon: Users },
-  { href: "/journal#ai-panel", label: "AI-ассистент", icon: Sparkles, badge: "3" },
-  { href: "/services", label: "Услуги", icon: Scissors },
-  { href: "/staff", label: "Мастера", icon: UserRound },
-  { href: "/cash", label: "Финансы", icon: Wallet },
-  { href: "/inventory", label: "Склад", icon: Boxes },
-  { href: "/loyalty", label: "Лояльность", icon: Gift },
-  { href: "/reports", label: "Отчёт дня", icon: BarChart3 },
-  { href: "/payroll", label: "Зарплаты", icon: Banknote },
-  { href: "/settings", label: "Настройки", icon: Settings },
+const DESK = ["owner", "admin", "super"];
+const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: string; roles: string[]; masterLabel?: string }[] = [
+  { href: "/journal", label: "Календарь", icon: CalendarDays, roles: [...DESK, "master"] },
+  { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard, roles: DESK },
+  { href: "/clients", label: "Клиенты", icon: Users, roles: [...DESK, "master"] },
+  { href: "/journal#ai-panel", label: "AI-ассистент", icon: Sparkles, badge: "3", roles: DESK },
+  { href: "/services", label: "Услуги", icon: Scissors, roles: DESK },
+  { href: "/staff", label: "Мастера", icon: UserRound, roles: [...DESK, "master"], masterLabel: "Мой график" },
+  { href: "/cash", label: "Финансы", icon: Wallet, roles: [...DESK, "accountant"] },
+  { href: "/inventory", label: "Склад", icon: Boxes, roles: [...DESK, "accountant"] },
+  { href: "/loyalty", label: "Лояльность", icon: Gift, roles: DESK },
+  { href: "/reports", label: "Отчёт дня", icon: BarChart3, roles: [...DESK, "accountant"] },
+  { href: "/payroll", label: "Зарплаты", icon: Banknote, roles: [...DESK, "accountant", "master"], masterLabel: "Моя зарплата" },
+  { href: "/settings", label: "Настройки", icon: Settings, roles: DESK },
 ];
 
 const ROLES: Record<string, string> = {
@@ -40,7 +41,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [offline, setOffline] = useState(false);
-  const showAi = pathname.startsWith("/journal");
+  const showAi = pathname.startsWith("/journal") && DESK.includes(me?.actor.role ?? "owner");
 
   useEffect(() => {
     api<Me>("/api/auth/me").then(setMe).catch(() => undefined);
@@ -76,14 +77,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </button>
           )}
           <nav className="nav">
-            {LINKS.map((link) => {
+            {LINKS.filter((link) => !me || link.roles.includes(me.actor.role)).map((link) => {
               const Icon = link.icon;
+              const label = me?.actor.role === "master" && link.masterLabel ? link.masterLabel : link.label;
               const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && pathname.startsWith(link.href));
               const calendarActive = link.href === "/journal" && pathname.startsWith("/journal") && link.label === "Календарь";
               return (
                 <Link key={link.label} href={link.href} className={`nav-item ${active || calendarActive ? "active" : ""}`}>
                   <Icon />
-                  {link.label}
+                  {label}
                   {link.badge && <span className="nav-badge">{link.badge}</span>}
                 </Link>
               );

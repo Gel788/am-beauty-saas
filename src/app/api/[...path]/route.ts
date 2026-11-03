@@ -69,6 +69,15 @@ import {
   updateRule,
 } from "@/server/payroll";
 import {
+  createException,
+  createScheduleRequest,
+  decideScheduleRequest,
+  deleteException,
+  listExceptions,
+  listScheduleRequests,
+  readWeekTemplate,
+} from "@/server/schedule";
+import {
   adjustBonus,
   clientLoyalty,
   createPlan,
@@ -534,7 +543,29 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (parts[0] === "staff" && parts[2] === "schedule" && method === "GET") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
-    return NextResponse.json(await run((ctx) => getWeekTemplate(ctx, parts[1], branchId)));
+    return NextResponse.json(await run((ctx) => readWeekTemplate(ctx, parts[1], branchId)));
+  }
+  if (parts[0] === "staff" && parts[2] === "exceptions" && method === "GET") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listExceptions(ctx, parts[1], branchId, url.searchParams.get("from") ?? "")));
+  }
+  if (parts[0] === "schedule-exceptions" && parts[1] && method === "DELETE") {
+    return NextResponse.json(await run((ctx) => deleteException(ctx, parts[1])));
+  }
+  if (key === "GET schedule-requests") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listScheduleRequests(ctx, branchId, { status: url.searchParams.get("status") || undefined })));
+  }
+  if (key === "POST schedule-requests") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, (body.branchId as string) ?? null);
+    return NextResponse.json(await run((ctx) => createScheduleRequest(ctx, { ...body, branchId } as never)));
+  }
+  if (parts[0] === "schedule-requests" && parts[1] && parts[2] === "decide" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(
+      await run((ctx) => decideScheduleRequest(ctx, parts[1], { approve: Boolean(body.approve), note: body.note as string | undefined, acknowledgeSoft: Boolean(body.acknowledgeSoft) })),
+    );
   }
   if (parts[0] === "staff" && parts[2] === "schedule" && method === "PUT") {
     const body = await readJson(request);
@@ -543,7 +574,8 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (parts[0] === "staff" && parts[2] === "exceptions" && method === "POST") {
     const body = await readJson(request);
-    return NextResponse.json(await run((ctx) => addException(ctx, { ...(body as object), staffId: parts[1] } as never)));
+    const branchId = await resolveBranch(actor, (body.branchId as string) ?? null);
+    return NextResponse.json(await run((ctx) => createException(ctx, parts[1], branchId, body as never, Boolean(body.acknowledgeSoft))));
   }
   if (parts[0] === "staff" && parts[2] === "copy-week" && method === "POST") {
     const body = await readJson(request);
