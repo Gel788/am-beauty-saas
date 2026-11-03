@@ -29,6 +29,8 @@ type Branch = {
   onlineCancelHours: number;
   onlineMaxActivePerPhone: number;
   onlineAccent: string;
+  reminderEnabled: boolean;
+  reminderHours: number;
 };
 
 export function SettingsView() {
@@ -70,6 +72,7 @@ export function SettingsView() {
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
+      <ReminderSettings branch={branch} onSaved={setBranch} />
     </>
   );
 }
@@ -140,8 +143,63 @@ function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (
       <div className="field"><label>Бронь слота пока клиент заполняет контакты, минут</label><input type="number" min={5} max={10} value={draft.onlineHoldMin} onChange={(event) => set("onlineHoldMin", Number(event.target.value))} /></div>
       <div className="field"><label>Клиент может отменить не позже чем за, часов</label><input type="number" min={0} value={draft.onlineCancelHours} onChange={(event) => set("onlineCancelHours", Number(event.target.value))} /></div>
       <div className="field"><label>Будущих онлайн-записей на один телефон</label><input type="number" min={1} value={draft.onlineMaxActivePerPhone} onChange={(event) => set("onlineMaxActivePerPhone", Number(event.target.value))} /></div>
-      <div className="field"><label>Цвет страницы записи</label><input type="color" value={draft.onlineAccent} onChange={(event) => set("onlineAccent", event.target.value)} /></div>
+      <div className="field"><label>Цвет страницы записи</label><input type="color" style={{ width: 64, height: 36, padding: 2 }} value={draft.onlineAccent} onChange={(event) => set("onlineAccent", event.target.value)} /></div>
       <button className="btn-gradient" type="submit">Сохранить онлайн-запись</button>
+    </form>
+  );
+}
+
+type Message = { id: string; channel: string; recipient: string; body: string; status: string; error: string | null; createdAt: string; clientName: string | null };
+
+function ReminderSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(branch.reminderEnabled);
+  const [hours, setHours] = useState(branch.reminderHours);
+  const [messages, setMessages] = useState<Message[] | null>(null);
+  useEffect(() => {
+    setEnabled(branch.reminderEnabled);
+    setHours(branch.reminderHours);
+  }, [branch]);
+  useEffect(() => {
+    api<Message[]>(`/api/messages?branchId=${branch.id}`).then(setMessages).catch(() => setMessages([]));
+  }, [branch.id]);
+  return (
+    <form
+      className="panel list"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        try {
+          onSaved(await api<Branch>(`/api/branches/${branch.id}`, { method: "PATCH", body: JSON.stringify({ reminderEnabled: enabled, reminderHours: hours }) }));
+          toast("Напоминания сохранены");
+        } catch (error) {
+          toast((error as ApiError).message, "error");
+        }
+      }}
+    >
+      <h2 style={{ margin: 0 }}>Напоминания клиентам</h2>
+      <span className="muted" style={{ fontSize: 13 }}>
+        Канал отправки пока не подключён: напоминания формируются по расписанию и записываются в журнал ниже. С 22:00 до 09:00 по времени филиала они не уходят и ждут утра.
+      </span>
+      <label className="row"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Напоминать о визите</label>
+      <div className="field"><label>За сколько часов до визита</label><input type="number" min={1} max={168} value={hours} onChange={(event) => setHours(Number(event.target.value))} /></div>
+      <button className="btn-gradient" type="submit">Сохранить напоминания</button>
+      <h3 style={{ margin: "8px 0 0", fontSize: 14 }}>Журнал сообщений</h3>
+      {!messages && <div className="skeleton" />}
+      {messages?.length === 0 && <span className="muted">Сообщений пока не было</span>}
+      {messages?.map((message) => (
+        <div key={message.id} className="list" style={{ gap: 2, paddingBottom: 8, borderBottom: "1px solid var(--line)" }}>
+          <div className="spread">
+            <b>{message.clientName ?? message.recipient}</b>
+            <span className={`tag ${message.status === "delivered" ? "tag-ok" : "tag-bad"}`}>
+              {message.status === "delivered" ? (message.channel === "log" ? "в журнале" : message.channel) : "не отправлено"}
+            </span>
+          </div>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {new Date(message.createdAt).toLocaleString("ru-RU")} · {message.recipient}{message.error ? ` · ${message.error}` : ""}
+          </span>
+          <span style={{ fontSize: 13 }}>{message.body}</span>
+        </div>
+      ))}
     </form>
   );
 }

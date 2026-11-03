@@ -50,6 +50,10 @@ export type BranchRow = {
   online_max_active_per_phone: number;
   online_accent: string;
   online_logo_url: string | null;
+  reminder_enabled: boolean;
+  reminder_hours: number;
+  quiet_start_min: number;
+  quiet_end_min: number;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

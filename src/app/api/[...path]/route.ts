@@ -50,6 +50,7 @@ import {
 } from "@/server/cash";
 import { dashboard } from "@/server/dashboard";
 import { dayReport } from "@/server/reports";
+import { listMessages, runReminderJob } from "@/server/reminders";
 import {
   asOnline,
   cancelBooking,
@@ -128,6 +129,14 @@ async function handle(request: NextRequest, parts: string[]) {
   }
 
   if (parts[0] === "public") return handlePublic(request, parts.slice(1));
+  if (key === "POST jobs/reminders") {
+    // Called by cron; without JOBS_TOKEN configured the endpoint stays closed.
+    const expected = process.env.JOBS_TOKEN;
+    if (!expected || request.headers.get("x-jobs-token") !== expected) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    }
+    return NextResponse.json(await runReminderJob());
+  }
 
   const actor = await actorFromToken(request.cookies.get("ab_session")?.value);
   if (!actor) {
@@ -160,6 +169,10 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "GET dashboard") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dashboard(ctx, branchId)));
+  }
+  if (key === "GET messages") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listMessages(ctx, branchId)));
   }
   if (key === "GET reports/day") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));

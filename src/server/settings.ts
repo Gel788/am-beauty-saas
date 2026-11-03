@@ -42,6 +42,8 @@ export function presentBranch(branch: BranchRow) {
     onlineCancelHours: Number(branch.online_cancel_hours),
     onlineMaxActivePerPhone: Number(branch.online_max_active_per_phone),
     onlineAccent: branch.online_accent,
+    reminderEnabled: branch.reminder_enabled,
+    reminderHours: Number(branch.reminder_hours),
   };
 }
 
@@ -51,6 +53,7 @@ const INT_FIELDS: Record<string, [number, number, string]> = {
   onlineHoldMin: [5, 10, "Бронь слота: от 5 до 10 минут"],
   onlineCancelHours: [0, 720, "Отмена клиентом: от 0 до 720 часов"],
   onlineMaxActivePerPhone: [1, 50, "Будущих записей на телефон: от 1 до 50"],
+  reminderHours: [1, 168, "Напоминание: от 1 до 168 часов до визита"],
 };
 
 /** The salon part of the public link /b/{tenantSlug}/{branchSlug}. Owner only. */
@@ -89,6 +92,8 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     onlineCancelHours: "online_cancel_hours",
     onlineMaxActivePerPhone: "online_max_active_per_phone",
     onlineAccent: "online_accent",
+    reminderEnabled: "reminder_enabled",
+    reminderHours: "reminder_hours",
   };
   for (const [key, [min, max, message]] of Object.entries(INT_FIELDS)) {
     if (input[key] === undefined) continue;
