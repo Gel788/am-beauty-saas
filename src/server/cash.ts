@@ -4,7 +4,7 @@ import { AppError } from "@/domain/errors";
 import { audit } from "./audit";
 import { loadBranch } from "./access";
 import { many, one } from "./db";
-import { LIVE_PAYMENT, assertMoney, insertPayment, requireShift, syncAppointmentDebt, type PaymentLineInput } from "./payments";
+import { LIVE_PAYMENT, assertMoney, externalRefs, insertPayment, requireShift, syncAppointmentDebt, type PaymentLineInput } from "./payments";
 import type { Ctx } from "./types";
 import { afterPaymentVoided } from "./inventory";
 import { afterPaymentVoided as loyaltyAfterVoided } from "./loyalty";
@@ -354,6 +354,8 @@ type PaymentRow = {
   posted_at: Date | null;
   created_by: string;
   created_by_name: string | null;
+  external_receipt_no: string | null;
+  terminal_ref: string | null;
 };
 
 async function describePayments(ctx: Ctx, where: string, params: unknown[], limit = 200) {
@@ -361,7 +363,7 @@ async function describePayments(ctx: Ctx, where: string, params: unknown[], limi
     ctx.db,
     `SELECT p.id, p.branch_id, p.appointment_id, p.client_id, c.name AS client_name, p.shift_id, s.status AS shift_status,
             p.direction, p.status, p.total_minor, p.change_minor, p.refund_of_id, p.refund_reason, p.void_reason,
-            p.posted_at, p.created_by, u.name AS created_by_name
+            p.posted_at, p.created_by, u.name AS created_by_name, p.external_receipt_no, p.terminal_ref
      FROM payments p
      LEFT JOIN clients c ON c.id = p.client_id
      LEFT JOIN cash_shifts s ON s.id = p.shift_id
@@ -424,6 +426,8 @@ async function describePayments(ctx: Ctx, where: string, params: unknown[], limi
       refundedMinor,
       refundableMinor,
       receipts: receipts.get(row.id) ?? [],
+      receiptNo: row.external_receipt_no,
+      terminalRef: row.terminal_ref,
       canRefund: refundableMinor > 0 && Boolean(active),
       canVoid:
         row.direction === "in" &&
@@ -507,9 +511,12 @@ export async function refundPayment(
     lines?: { lineId: string; amountMinor: number }[];
     method?: RefundMethod;
     reason?: string;
+    receiptNo?: string;
+    terminalRef?: string;
   } = {},
 ) {
   assertCashRole(ctx);
+  const external = externalRefs(input);
   const original = await lockOriginal(ctx, paymentId);
   // P1: refunds go through the currently open shift (it may differ from the original's shift).
   const { shiftId } = await requireShift(ctx, original.branch_id);
@@ -608,6 +615,7 @@ export async function refundPayment(
   }
 
   const refund = await insertPayment(ctx, {
+    ...external,
     branchId: original.branch_id,
     appointmentId: original.appointment_id,
     clientId: original.client_id,
@@ -730,4 +738,28 @@ export async function voidPayment(ctx: Ctx, paymentId: string, input: { reason?:
     });
   }
   return { id: paymentId, status: "void" as const, ...(synced ?? {}) };
+}
+
+/** PAY-EXT-02: the receipt number or terminal code is often typed in after the fact. */
+export async function setPaymentRefs(ctx: Ctx, paymentId: string, input: { receiptNo?: unknown; terminalRef?: unknown }) {
+  assertCashRole(ctx);
+  const payment = await one<{ id: string; branch_id: string; external_receipt_no: string | null; terminal_ref: string | null }>(
+    ctx.db,
+    "SELECT id, branch_id, external_receipt_no, terminal_ref FROM payments WHERE id = $1 FOR UPDATE",
+    [paymentId],
+  );
+  if (!payment) throw new AppError("NOT_FOUND", "Платёж не найден");
+  await loadBranch(ctx, payment.branch_id);
+  const next = externalRefs(input);
+  const receiptNo = input.receiptNo === undefined ? payment.external_receipt_no : next.receiptNo;
+  const terminalRef = input.terminalRef === undefined ? payment.terminal_ref : next.terminalRef;
+  await ctx.db.query("UPDATE payments SET external_receipt_no = $2, terminal_ref = $3, version = version + 1 WHERE id = $1", [paymentId, receiptNo, terminalRef]);
+  await audit(ctx, {
+    branchId: payment.branch_id,
+    entity: "payment",
+    entityId: paymentId,
+    action: "payment.refs_updated",
+    diff: { receiptNo: [payment.external_receipt_no, receiptNo], terminalRef: [payment.terminal_ref, terminalRef] },
+  });
+  return { id: paymentId, receiptNo, terminalRef };
 }

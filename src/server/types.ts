@@ -66,6 +66,7 @@ export type BranchRow = {
   acquiring_enabled: boolean;
   acquiring_provider: string;
   acquiring_link_hours: number;
+  external_receipts: boolean;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

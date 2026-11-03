@@ -60,6 +60,7 @@ import {
   shiftReport,
   startClosing,
   voidPayment,
+  setPaymentRefs,
 } from "@/server/cash";
 import { dashboard } from "@/server/dashboard";
 import { dayReport } from "@/server/reports";
@@ -674,6 +675,10 @@ async function handle(request: NextRequest, parts: string[]) {
     const result = await run((ctx) => refundPayment(ctx, parts[1], body as never));
     kickFiscal(actor.tenantId);
     return NextResponse.json(result);
+  }
+  if (parts[0] === "payments" && parts[1] && parts[2] === "refs" && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => setPaymentRefs(ctx, parts[1], body)));
   }
   if (parts[0] === "payments" && parts[1] && parts[2] === "void" && method === "POST") {
     const body = await readJson(request);

@@ -194,8 +194,13 @@ export async function createPayment(
     planId?: string;
     /** ACQ-*: paid through the acquiring provider; the money is in the bank, not in the shift's drawer. */
     online?: boolean;
+    /** PAY-EXT-01: the receipt was printed on the salon's own kassa; its number, optional. */
+    receiptNo?: string;
+    /** PAY-EXT-01: the bank terminal's operation code (RRN / auth code), optional. */
+    terminalRef?: string;
   },
 ): Promise<PaymentResult> {
+  const external = externalRefs(input);
   const kind = input.kind ?? (input.appointmentId ? "visit" : "misc");
   if (kind === "misc" || kind === "debt" || kind === "certificate" || kind === "membership") {
     if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") {
@@ -230,6 +235,7 @@ export async function createPayment(
     const cashHanded = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
     if (change > cashHanded) throw new AppError("VALIDATION", "Сдача возможна только с наличных. Уменьшите сумму карты");
     const payment = await insertPayment(ctx, {
+      ...external,
       branchId: input.branchId,
       appointmentId: null,
       clientId,
@@ -266,6 +272,7 @@ export async function createPayment(
     if (change > cashHanded) throw new AppError("VALIDATION", "Сдача возможна только с наличных. Уменьшите сумму карты");
     const resolved = await resolveTenders(ctx, { tenders: input.tenders, branchId: input.branchId, clientId, bill: goods, appointmentId: null });
     const sale = await insertPayment(ctx, {
+      ...external,
       branchId: input.branchId,
       appointmentId: null,
       clientId,
@@ -336,16 +343,20 @@ export async function createPayment(
     } else {
       if (tipMinor > handed) throw new AppError("VALIDATION", "Чаевые больше внесённой суммы");
       const cashHanded = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
-      if (serviceDue === 0 && tipMinor === 0) {
+      // PAY-UPSELL-01: goods sold to the client at checkout go into the same payment and receipt.
+      const goodsLines = input.items?.length ? await productLines(ctx, input.branchId, input.items) : [];
+      const goodsMinor = goodsLines.reduce((sum, line) => sum + line.amountMinor, 0);
+      if (serviceDue === 0 && tipMinor === 0 && goodsMinor === 0) {
         throw new AppError("VALIDATION", "Запись уже оплачена");
       }
+      if (handed < goodsMinor + tipMinor) throw new AppError("VALIDATION", "Внесено меньше суммы товаров и чаевых");
       const intendedService = input.amountMinor !== undefined ? Math.min(input.amountMinor, serviceDue) : serviceDue;
-      const servicePay = Math.min(intendedService, Math.max(0, handed - tipMinor), serviceDue);
-      if (servicePay + tipMinor <= 0) throw new AppError("VALIDATION", "Укажите сумму оплаты");
-      if (input.acknowledgePartial === false && servicePay + tipMinor < serviceDue + tipMinor && servicePay < serviceDue) {
+      const servicePay = Math.min(intendedService, Math.max(0, handed - tipMinor - goodsMinor), serviceDue);
+      if (servicePay + tipMinor + goodsMinor <= 0) throw new AppError("VALIDATION", "Укажите сумму оплаты");
+      if (input.acknowledgePartial === false && servicePay < serviceDue) {
         throw new AppError("VALIDATION", "Суммы не хватает для полной оплаты");
       }
-      const bill = servicePay + tipMinor;
+      const bill = servicePay + tipMinor + goodsMinor;
       let change = 0;
       if (handed > bill) {
         change = handed - bill;
@@ -370,6 +381,7 @@ export async function createPayment(
         left -= take;
       }
       if (left > 0) throw new AppError("VALIDATION", "Сумма больше остатка по записи");
+      lines.push(...goodsLines);
       if (tipMinor > 0) lines.push({ type: "tip", refId: appointmentId, title: "Чаевые", amountMinor: tipMinor });
       const total = lines.reduce((sum, line) => sum + line.amountMinor, 0);
       const serviceDueList = [];
@@ -394,12 +406,13 @@ export async function createPayment(
         tenders: input.tenders,
         branchId: input.branchId,
         clientId,
-        bill: servicePay,
+        bill: servicePay + goodsMinor,
         bonusBase: { totalMinor: services.rows.reduce((sum, service) => sum + Number(service.price_minor), 0), spentMinor: Number(spent?.s ?? 0) },
         appointmentId,
         serviceDue: serviceDueList,
       });
       const payment = await insertPayment(ctx, {
+      ...external,
         branchId: input.branchId,
         appointmentId,
         clientId,
@@ -420,6 +433,7 @@ export async function createPayment(
 
   const total = lines.reduce((sum, line) => sum + line.amountMinor, 0);
   const payment = await insertPayment(ctx, {
+      ...external,
     branchId: input.branchId,
     appointmentId,
     clientId,
@@ -444,6 +458,15 @@ export async function createPayment(
     );
   }
   return { ...payment, ...(synced ?? {}), partial: synced ? synced.paidMinor < synced.priceMinor && synced.paidMinor > 0 : false };
+}
+
+export function externalRefs(input: { receiptNo?: unknown; terminalRef?: unknown }) {
+  const clean = (value: unknown, label: string) => {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text.length > 40) throw new AppError("VALIDATION", `${label}: не длиннее 40 символов`);
+    return text || null;
+  };
+  return { receiptNo: clean(input.receiptNo, "Номер чека"), terminalRef: clean(input.terminalRef, "Код операции терминала") };
 }
 
 function storedTenders(tenders: StoredTender[], change: number) {
@@ -485,6 +508,8 @@ export async function insertPayment(
     direction?: "in" | "out";
     refundOfId?: string | null;
     refundReason?: string | null;
+    receiptNo?: string | null;
+    terminalRef?: string | null;
   },
 ) {
   const direction = input.direction ?? "in";
@@ -496,8 +521,8 @@ export async function insertPayment(
   await ctx.db.query(
     `INSERT INTO payments (
        id, tenant_id, branch_id, appointment_id, client_id, shift_id, direction, status,
-       total_minor, change_minor, created_by, posted_at, refund_of_id, refund_reason
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'posted',$8,$9,$10, now(), $11, $12)`,
+       total_minor, change_minor, created_by, posted_at, refund_of_id, refund_reason, external_receipt_no, terminal_ref
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'posted',$8,$9,$10, now(), $11, $12, $13, $14)`,
     [
       id,
       ctx.actor.tenantId,
@@ -511,6 +536,8 @@ export async function insertPayment(
       ctx.actor.userId,
       input.refundOfId ?? null,
       input.refundReason ?? null,
+      input.receiptNo ?? null,
+      input.terminalRef ?? null,
     ],
   );
   const lineIds: string[] = [];

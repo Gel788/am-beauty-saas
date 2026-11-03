@@ -81,10 +81,28 @@ export function RecordDrawer({
   const [loyalty, setLoyalty] = useState<Loyalty | null>(null);
   const [certCode, setCertCode] = useState("");
   const [membershipId, setMembershipId] = useState("");
+  const [goods, setGoods] = useState<{ id: string; title: string; sellPriceMinor: number; qty: number; trackStock: boolean }[]>([]);
+  const [cart, setCart] = useState<{ itemId: string; title: string; priceMinor: number; qty: number }[]>([]);
+  const [pickItem, setPickItem] = useState("");
+  const [pickQty, setPickQty] = useState("1");
+  const [externalReceipts, setExternalReceipts] = useState(false);
+  const [receiptNo, setReceiptNo] = useState("");
+  const [terminalRef, setTerminalRef] = useState("");
+  const goodsMinor = cart.reduce((sum, line) => sum + Math.round(line.priceMinor * line.qty), 0);
 
   const mark = () => setDirty(true);
   const duration = lines.reduce((sum, line) => sum + line.durationMin, 0) || 30;
   const price = lines.reduce((sum, line) => sum + line.priceMinor, 0);
+
+  useEffect(() => {
+    // PAY-UPSELL-01 / PAY-EXT-01: goods for sale and how this branch prints receipts.
+    api<{ id: string; title: string; sellPriceMinor: number; forSale: boolean; active: boolean; qty: number; trackStock: boolean }[]>(`/api/inventory/items?branchId=${branchId}`)
+      .then((items) => setGoods(items.filter((item) => item.forSale && item.active)))
+      .catch(() => setGoods([]));
+    api<{ id: string; externalReceipts?: boolean }[]>("/api/branches")
+      .then((rows) => setExternalReceipts(Boolean(rows.find((row) => row.id === branchId)?.externalReceipts)))
+      .catch(() => undefined);
+  }, [branchId]);
 
   useEffect(() => {
     api<{ services: CatalogService[] }>("/api/catalog").then((data) => setServices(data.services)).catch(() => undefined);
@@ -311,7 +329,9 @@ export function RecordDrawer({
   async function takePayment() {
     if (!seed.id) return;
     const tip = loyaltyPay ? 0 : rublesToMinor(Number(tipRub || 0));
-    const tender: Record<string, unknown> = { method: payMethod, amountMinor: rublesToMinor(Number(payRub || 0)) + tip };
+    const serviceMinor = rublesToMinor(Number(payRub || 0));
+    const extra = loyaltyPay ? 0 : goodsMinor;
+    const tender: Record<string, unknown> = { method: payMethod, amountMinor: serviceMinor + tip + extra };
     if (payMethod === "certificate") tender.certificateCode = certCode;
     if (payMethod === "membership") tender.membershipId = membershipId;
     try {
@@ -323,9 +343,14 @@ export function RecordDrawer({
           version,
           tipMinor: tip,
           tenders: [tender],
+          ...(extra > 0 ? { amountMinor: serviceMinor, items: cart.map((line) => ({ itemId: line.itemId, qty: line.qty })) } : {}),
+          ...(externalReceipts ? { receiptNo, terminalRef } : {}),
         }),
       });
-      toast("Оплата проведена");
+      setCart([]);
+      setReceiptNo("");
+      setTerminalRef("");
+      toast(extra > 0 ? "Оплата проведена, товары списаны со склада" : "Оплата проведена");
       onSaved();
     } catch (error) {
       const err = error as ApiError;
@@ -491,12 +516,67 @@ export function RecordDrawer({
                     </select>
                   </div>
                 )}
-                <div className="field"><label>Сумма, ₽</label><input value={payRub} readOnly={payMethod === "membership"} onChange={(event) => setPayRub(event.target.value)} /></div>
+                <div className="field"><label>{cart.length ? "Сумма за услуги, ₽" : "Сумма, ₽"}</label><input value={payRub} readOnly={payMethod === "membership"} onChange={(event) => setPayRub(event.target.value)} /></div>
                 {payMethod === "bonus" && loyalty && (
                   <small className="muted">Баллами можно оплатить до {formatMoney(Math.floor((price * loyalty.program.bonusBurnMaxBps) / 10000))} этого визита. Остаток доплатите вторым платежом.</small>
                 )}
+                {!loyaltyPay && goods.length > 0 && (
+                  <div className="list upsell" style={{ gap: 6 }}>
+                    <label className="muted" style={{ fontSize: 12 }}>Допродажа: товары клиенту</label>
+                    <div className="row" style={{ gap: 6 }}>
+                      <select value={pickItem} onChange={(event) => setPickItem(event.target.value)} style={{ flex: 1, minWidth: 0 }} aria-label="Товар">
+                        <option value="">Выберите товар</option>
+                        {goods.map((item) => (
+                          <option key={item.id} value={item.id}>{item.title} · {formatMoney(item.sellPriceMinor)}{item.trackStock ? ` · ост. ${item.qty}` : ""}</option>
+                        ))}
+                      </select>
+                      <input aria-label="Количество" value={pickQty} onChange={(event) => setPickQty(event.target.value)} style={{ width: 56 }} />
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={!pickItem}
+                        onClick={() => {
+                          const item = goods.find((entry) => entry.id === pickItem);
+                          const qty = Number(pickQty.replace(",", "."));
+                          if (!item || !(qty > 0)) return;
+                          setCart((rows) => {
+                            const existing = rows.find((row) => row.itemId === item.id);
+                            if (existing) return rows.map((row) => (row.itemId === item.id ? { ...row, qty: row.qty + qty } : row));
+                            return [...rows, { itemId: item.id, title: item.title, priceMinor: item.sellPriceMinor, qty }];
+                          });
+                          setPickItem("");
+                          setPickQty("1");
+                        }}
+                      >
+                        Добавить
+                      </button>
+                    </div>
+                    {cart.map((line) => (
+                      <div key={line.itemId} className="spread chip">
+                        <span>{line.title}{line.qty !== 1 ? ` × ${line.qty}` : ""}</span>
+                        <span className="row" style={{ gap: 6 }}>
+                          <b>{formatMoney(Math.round(line.priceMinor * line.qty))}</b>
+                          <button className="btn-ghost" type="button" aria-label={`Убрать ${line.title}`} onClick={() => setCart((rows) => rows.filter((row) => row.itemId !== line.itemId))}>×</button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {!loyaltyPay && <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>}
-                <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>Провести</button>
+                {externalReceipts && (
+                  <div className="form-grid">
+                    <div className="field"><label>Номер чека с кассы</label><input placeholder="необязательно" value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} /></div>
+                    {(payMethod === "card" || payMethod === "sbp") && (
+                      <div className="field"><label>Код операции терминала</label><input placeholder="RRN или код авторизации" value={terminalRef} onChange={(event) => setTerminalRef(event.target.value)} /></div>
+                    )}
+                  </div>
+                )}
+                {!loyaltyPay && (goodsMinor > 0 || rublesToMinor(Number(tipRub || 0)) > 0) && (
+                  <div className="spread"><span className="muted">Итого с клиента</span><b>{formatMoney(rublesToMinor(Number(payRub || 0)) + goodsMinor + rublesToMinor(Number(tipRub || 0)))}</b></div>
+                )}
+                <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>
+                  {externalReceipts && (payMethod === "card" || payMethod === "sbp") ? "Оплачено на терминале" : "Провести"}
+                </button>
                 {seed.id && <PayLinkBlock appointmentId={seed.id} dueMinor={Math.max(0, price - paidMinor)} onPaid={paidOnline} />}
               </>
             )}

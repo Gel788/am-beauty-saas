@@ -50,6 +50,7 @@ export function presentBranch(branch: BranchRow) {
     consumePolicy: branch.consume_policy,
     allowNegativeStock: branch.allow_negative_stock,
     fiscalEnabled: branch.fiscal_enabled,
+    externalReceipts: branch.external_receipts,
     fiscalProvider: branch.fiscal_provider,
     fiscalInn: branch.fiscal_inn,
     fiscalTaxation: branch.fiscal_taxation,
@@ -113,6 +114,7 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     consumePolicy: "consume_policy",
     allowNegativeStock: "allow_negative_stock",
     fiscalEnabled: "fiscal_enabled",
+    externalReceipts: "external_receipts",
     fiscalProvider: "fiscal_provider",
     fiscalInn: "fiscal_inn",
     fiscalTaxation: "fiscal_taxation",
@@ -124,7 +126,7 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
   };
   // Forms send the whole branch back, so only a changed value counts as an attempt.
   const before = presentBranch(await loadBranch(ctx, id)) as Record<string, unknown>;
-  const fiscalKeys = ["fiscalEnabled", "fiscalProvider", "fiscalInn", "fiscalTaxation", "fiscalVat", "fiscalPlace", "acquiringEnabled", "acquiringProvider", "acquiringLinkHours"];
+  const fiscalKeys = ["fiscalEnabled", "externalReceipts", "fiscalProvider", "fiscalInn", "fiscalTaxation", "fiscalVat", "fiscalPlace", "acquiringEnabled", "acquiringProvider", "acquiringLinkHours"];
   if (fiscalKeys.some((key) => input[key] !== undefined && input[key] !== before[key]) && ctx.actor.role !== "owner" && ctx.actor.role !== "super") {
     throw new AppError("FORBIDDEN", "Кассу и онлайн-оплату настраивает владелец");
   }
@@ -145,6 +147,10 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
   if (input.acquiringProvider !== undefined && !acquiringProviders().some((provider) => provider.name === input.acquiringProvider)) {
     throw new AppError("VALIDATION", "Такого провайдера оплаты нет");
   }
+  // One source of receipts: either the CRM's online kassa or the salon's own one.
+  if (input.fiscalEnabled === true && input.externalReceipts === true) throw new AppError("VALIDATION", "Выберите одно: онлайн-касса через CRM или своя касса");
+  if (input.fiscalEnabled === true && input.externalReceipts === undefined) input.externalReceipts = false;
+  if (input.externalReceipts === true && input.fiscalEnabled === undefined) input.fiscalEnabled = false;
   if (input.fiscalEnabled === true) {
     const current = await loadBranch(ctx, id);
     const inn = String(input.fiscalInn ?? current.fiscal_inn);

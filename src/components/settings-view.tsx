@@ -34,6 +34,7 @@ type Branch = {
   consumePolicy: "warn" | "block";
   allowNegativeStock: boolean;
   fiscalEnabled: boolean;
+  externalReceipts: boolean;
   fiscalProvider: string;
   fiscalInn: string;
   fiscalTaxation: string;
@@ -199,6 +200,7 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
             method: "PATCH",
             body: JSON.stringify({
               fiscalEnabled: draft.fiscalEnabled,
+              externalReceipts: draft.externalReceipts,
               fiscalProvider: draft.fiscalProvider,
               fiscalInn: draft.fiscalInn,
               fiscalTaxation: draft.fiscalTaxation,
@@ -220,12 +222,34 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
       <span className="muted" style={{ fontSize: 13 }}>
         Каждая оплата и возврат превращаются в кассовый чек по 54-ФЗ и уходят в онлайн-кассу. Чаевые в чек не попадают, бонусы уменьшают цену, сертификат и абонемент идут как зачёт предоплаты. Меняет владелец.
       </span>
-      {sandbox && (
+      <div className="list" style={{ gap: 6 }}>
+        <b style={{ fontSize: 14 }}>Как пробиваете чеки</b>
+        {[
+          ["off", "Не пробиваем через CRM", "Оплаты просто записываются в кассу CRM."],
+          ["external", "На своей кассе и терминале", "Клиент платит на вашем терминале, администратор вносит оплату вручную. Номер чека и код операции можно указать сразу или позже."],
+          ["online", "Онлайн-касса через CRM", "CRM сама отправляет чек по каждой оплате и возврату."],
+        ].map(([value, label, hint]) => {
+          const current = draft.fiscalEnabled ? "online" : draft.externalReceipts ? "external" : "off";
+          return (
+            <label key={value} className="row" style={{ alignItems: "flex-start", gap: 8 }}>
+              <input
+                type="radio"
+                name="receipt-mode"
+                checked={current === value}
+                onChange={() => setDraft({ ...draft, fiscalEnabled: value === "online", externalReceipts: value === "external" })}
+                style={{ marginTop: 3 }}
+              />
+              <span><span>{label}</span><br /><span className="muted" style={{ fontSize: 12 }}>{hint}</span></span>
+            </label>
+          );
+        })}
+      </div>
+      {draft.fiscalEnabled && sandbox && (
         <div className="tag tag-warn" style={{ alignSelf: "flex-start", whiteSpace: "normal" }}>
           Подключён тестовый режим: чеки не уходят в ФНС, деньги не списываются. Боевой провайдер подключается, когда будут договор и ключи.
         </div>
       )}
-      <label className="row"><input type="checkbox" checked={draft.fiscalEnabled} onChange={(event) => set("fiscalEnabled", event.target.checked)} /> Пробивать чеки</label>
+      {draft.fiscalEnabled && (<>
       <div className="form-grid">
         <div className="field">
           <label>Онлайн-касса</label>
@@ -248,6 +272,7 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
         </div>
       </div>
       <div className="field"><label>Адрес расчётов (печатается в чеке)</label><input placeholder="г. Москва, ул. Садовая, 1" value={draft.fiscalPlace} onChange={(event) => set("fiscalPlace", event.target.value)} /></div>
+      </>)}
       <label className="row"><input type="checkbox" checked={draft.acquiringEnabled} onChange={(event) => set("acquiringEnabled", event.target.checked)} /> Принимать оплату по ссылке: карта и СБП</label>
       <div className="form-grid">
         <div className="field">

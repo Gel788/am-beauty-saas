@@ -151,7 +151,7 @@ export function CashView() {
       {!loading && tab === "history" && <HistoryList items={history} onOpen={openReport} />}
 
       {report && <ZReport report={report} onClose={() => setReport(null)} onChanged={() => openReport(report.shift.id)} />}
-      {income && branch && <IncomeModal branchId={branch.id} onClose={() => setIncome(false)} onDone={() => { setIncome(false); void load(); }} />}
+      {income && branch && <IncomeModal branchId={branch.id} external={Boolean((branch as { externalReceipts?: boolean }).externalReceipts)} onClose={() => setIncome(false)} onDone={() => { setIncome(false); void load(); }} />}
     </div>
   );
 }
@@ -499,7 +499,9 @@ function ZReport({ report, onClose, onChanged }: { report: Report; onClose: () =
 
 type SaleItem = { id: string; title: string; sellPriceMinor: number; forSale: boolean; active: boolean; trackStock: boolean; qty: number };
 
-function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose: () => void; onDone: () => void }) {
+function IncomeModal({ branchId, external, onClose, onDone }: { branchId: string; external: boolean; onClose: () => void; onDone: () => void }) {
+  const [receiptNo, setReceiptNo] = useState("");
+  const [terminalRef, setTerminalRef] = useState("");
   const toast = useToast();
   const [mode, setMode] = useState<"goods" | "free" | "cert" | "sub">("goods");
   const [plans, setPlans] = useState<{ id: string; title: string; visits: number; validDays: number; priceMinor: number; active: boolean }[]>([]);
@@ -623,6 +625,14 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
             <button key={id} type="button" className={method === id ? "on" : ""} onClick={() => setMethod(id)}>{METHOD_LABEL[id]}</button>
           ))}
         </div>
+        {external && (
+          <div className="form-grid">
+            <div className="field"><label>Номер чека с кассы</label><input placeholder="необязательно" value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} /></div>
+            {(method === "card" || method === "sbp") && (
+              <div className="field"><label>Код операции терминала</label><input placeholder="необязательно" value={terminalRef} onChange={(event) => setTerminalRef(event.target.value)} /></div>
+            )}
+          </div>
+        )}
         <div className="row">
           <button className="btn" type="button" onClick={onClose}>Отмена</button>
           <button
@@ -641,7 +651,8 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
                       : mode === "sub"
                         ? { branchId, kind: "membership", planId, clientId: client?.id, tenders }
                         : { branchId, kind: "misc", title, tenders };
-                const result = await api<{ issued?: { kind: string; code?: string }[] }>("/api/payments", { method: "POST", body: JSON.stringify(body) });
+                const refs = external ? { receiptNo, terminalRef } : {};
+                const result = await api<{ issued?: { kind: string; code?: string }[] }>("/api/payments", { method: "POST", body: JSON.stringify({ ...body, ...refs }) });
                 const code = result.issued?.find((entry) => entry.code)?.code;
                 if (code) return setIssuedCode(code);
                 toast(mode === "goods" ? "Продажа проведена, остаток списан" : mode === "sub" ? `Абонемент оформлен на ${client?.name}` : "Приход проведён");

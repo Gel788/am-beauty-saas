@@ -27,7 +27,49 @@ export type PaymentItem = {
   canRefund: boolean;
   canVoid: boolean;
   receipts?: { id: string; kind: string; status: string }[];
+  receiptNo?: string | null;
+  terminalRef?: string | null;
 };
+
+/** PAY-EXT-02: receipt number from the salon's own kassa and the terminal code, editable after the fact. */
+function ExternalRefs({ payment, onChanged }: { payment: PaymentItem; onChanged: () => void }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [receiptNo, setReceiptNo] = useState(payment.receiptNo ?? "");
+  const [terminalRef, setTerminalRef] = useState(payment.terminalRef ?? "");
+  if (!editing) {
+    return (
+      <div className="spread" style={{ fontSize: 13 }}>
+        <span className="muted">
+          {payment.receiptNo ? `Чек с кассы № ${payment.receiptNo}` : "Номер чека не указан"}
+          {payment.terminalRef ? ` · терминал ${payment.terminalRef}` : ""}
+        </span>
+        <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>{payment.receiptNo || payment.terminalRef ? "Изменить" : "Указать"}</button>
+      </div>
+    );
+  }
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+      <input aria-label="Номер чека" placeholder="Номер чека" value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} style={{ width: 120 }} />
+      <input aria-label="Код операции терминала" placeholder="Код терминала" value={terminalRef} onChange={(event) => setTerminalRef(event.target.value)} style={{ width: 160 }} />
+      <button
+        type="button"
+        className="btn"
+        onClick={async () => {
+          try {
+            await api(`/api/payments/${payment.id}/refs`, { method: "PATCH", body: JSON.stringify({ receiptNo, terminalRef }) });
+            setEditing(false);
+            onChanged();
+          } catch (error) {
+            toast((error as ApiError).message, "error");
+          }
+        }}
+      >
+        Сохранить
+      </button>
+    </div>
+  );
+}
 
 type ReceiptDetail = {
   id: string;
@@ -127,7 +169,7 @@ export const METHOD_LABEL: Record<string, string> = {
 const LINE_LABEL: Record<string, string> = {
   service: "Услуга",
   deposit: "Предоплата",
-  product: "Приход",
+  product: "Товар",
   tip: "Чаевые",
   debt: "Погашение долга",
 };
@@ -171,6 +213,7 @@ export function PaymentRow({ payment, onChanged, compact = false }: { payment: P
         </span>
         {tag}
         {receipt && payment.status !== "void" && <span className={`tag receipt-chip ${RECEIPT_STATUS[receipt.status]?.[1] ?? ""}`}>{RECEIPT_STATUS[receipt.status]?.[0]}</span>}
+        {!receipt && payment.receiptNo && payment.status !== "void" && <span className="tag receipt-chip tag-muted">чек № {payment.receiptNo}</span>}
         <b className={`pay-sum ${out ? "out" : ""}`}>{out ? "−" : ""}{formatMoney(payment.totalMinor)}</b>
       </button>
       {open && (
@@ -185,7 +228,11 @@ export function PaymentRow({ payment, onChanged, compact = false }: { payment: P
           {payment.refundReason && <div className="muted">Причина возврата: {payment.refundReason}</div>}
           {payment.voidReason && <div className="muted">Аннулирован: {payment.voidReason}</div>}
           <div className="muted">Провёл: {payment.createdByName}{!payment.shiftId && payment.direction === "in" ? " · онлайн-оплата, вне смены" : ""}</div>
-          {(payment.receipts?.length ?? 0) > 0 && <ReceiptBlock paymentId={payment.id} onChanged={onChanged} />}
+          {(payment.receipts?.length ?? 0) > 0 ? (
+            <ReceiptBlock paymentId={payment.id} onChanged={onChanged} />
+          ) : (
+            payment.status !== "void" && <ExternalRefs payment={payment} onChanged={onChanged} />
+          )}
           {(payment.canRefund || payment.canVoid) && (
             <div className="row" style={{ marginTop: 6 }}>
               {payment.canRefund && <button type="button" className="btn" onClick={() => setMode("refund")}>Возврат</button>}
