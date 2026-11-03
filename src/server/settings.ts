@@ -28,6 +28,7 @@ export function presentBranch(branch: BranchRow) {
     noShowGraceMin: branch.no_show_grace_min,
     gridLabelMin: branch.grid_label_min,
     requirePaymentOnComplete: branch.require_payment_on_complete,
+    shiftVarianceThresholdMinor: Number(branch.shift_variance_threshold_minor ?? 0),
   };
 }
 
@@ -48,6 +49,7 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     noShowGraceMin: "no_show_grace_min",
     gridLabelMin: "grid_label_min",
     requirePaymentOnComplete: "require_payment_on_complete",
+    shiftVarianceThresholdMinor: "shift_variance_threshold_minor",
   };
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -56,6 +58,10 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
       values.push(input[key]);
       sets.push(`${column} = $${values.length + 1}`);
     }
+  }
+  if (input.shiftVarianceThresholdMinor !== undefined) {
+    const value = Number(input.shiftVarianceThresholdMinor);
+    if (!Number.isInteger(value) || value < 0) throw new AppError("VALIDATION", "Порог расхождения — целое число копеек ≥ 0");
   }
   if (!sets.length) throw new AppError("VALIDATION", "Нет полей для сохранения");
   values.unshift(id);

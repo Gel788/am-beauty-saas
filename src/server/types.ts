@@ -37,4 +37,5 @@ export type BranchRow = {
   grid_step_min: number;
   grid_label_min: number;
   require_payment_on_complete: boolean;
+  shift_variance_threshold_minor: number;
 };

@@ -35,7 +35,19 @@ import {
   updateService,
   updateStaff,
 } from "@/server/catalog";
-import { createPayment, currentShift, listPayments, openShift } from "@/server/payments";
+import { createPayment, openShift } from "@/server/payments";
+import {
+  appointmentPayments,
+  cancelClosing,
+  closeShift,
+  currentShift,
+  listPayments,
+  listShifts,
+  refundPayment,
+  shiftReport,
+  startClosing,
+  voidPayment,
+} from "@/server/cash";
 import { dashboard } from "@/server/dashboard";
 import { listBranches, updateBranch } from "@/server/settings";
 import type { Actor } from "@/server/types";
@@ -302,9 +314,41 @@ async function handle(request: NextRequest, parts: string[]) {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => currentShift(ctx, branchId)));
   }
+  if (key === "GET shifts") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listShifts(ctx, branchId, Number(url.searchParams.get("limit") || 30))));
+  }
+  if (parts[0] === "shifts" && parts[1] && parts[1] !== "open" && parts[1] !== "current") {
+    const shiftId = parts[1];
+    if (method === "GET" && parts[2] === "report") return NextResponse.json(await run((ctx) => shiftReport(ctx, shiftId)));
+    if (method === "POST" && parts[2] === "start-closing") return NextResponse.json(await run((ctx) => startClosing(ctx, shiftId)));
+    if (method === "POST" && parts[2] === "cancel-closing") return NextResponse.json(await run((ctx) => cancelClosing(ctx, shiftId)));
+    if (method === "POST" && parts[2] === "close") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => closeShift(ctx, shiftId, body as never)));
+    }
+  }
   if (key === "GET payments") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
-    return NextResponse.json(await run((ctx) => listPayments(ctx, branchId, url.searchParams.get("date") || undefined)));
+    return NextResponse.json(
+      await run((ctx) =>
+        listPayments(ctx, branchId, {
+          date: url.searchParams.get("date") || undefined,
+          shiftId: url.searchParams.get("shiftId") || undefined,
+        }),
+      ),
+    );
+  }
+  if (parts[0] === "payments" && parts[1] && parts[2] === "refund" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => refundPayment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "payments" && parts[1] && parts[2] === "void" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => voidPayment(ctx, parts[1], body as never)));
+  }
+  if (parts[0] === "appointments" && parts[1] && parts[2] === "payments" && method === "GET") {
+    return NextResponse.json(await run((ctx) => appointmentPayments(ctx, parts[1])));
   }
   if (key === "POST payments") {
     const body = await readJson(request);

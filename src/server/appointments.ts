@@ -15,7 +15,7 @@ import { assertRole, isAdminPlus, loadBranch } from "./access";
 import { createClient } from "./clients";
 import { many, one } from "./db";
 import { loadWorkingIntervals } from "./hours";
-import { clearAppointmentDebt, syncAppointmentDebt } from "./payments";
+import { LIVE_PAYMENT, NET_AMOUNT, clearAppointmentDebt, syncAppointmentDebt } from "./payments";
 import type { BranchRow, Ctx } from "./types";
 
 type ServiceInput = { serviceId: string; durationMin?: number };
@@ -97,9 +97,9 @@ async function linesOf(ctx: Ctx, appointmentId: string): Promise<Line[]> {
 async function paidMinor(ctx: Ctx, appointmentId: string): Promise<number> {
   const row = await one<{ s: number }>(
     ctx.db,
-    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+    `SELECT ${NET_AMOUNT} AS s
      FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
-     WHERE p.appointment_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type IN ('service', 'deposit')`,
     [appointmentId],
   );

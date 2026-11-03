@@ -2,6 +2,7 @@ import { localDayUtcRange, todayInZone, addCalendarDays } from "@/domain/time";
 import { loadBranch } from "./access";
 import { many, one } from "./db";
 import { getJournal } from "./appointments";
+import { LIVE_PAYMENT, NET_AMOUNT } from "./payments";
 import type { Ctx } from "./types";
 
 export async function dashboard(ctx: Ctx, branchId: string) {
@@ -13,10 +14,10 @@ export async function dashboard(ctx: Ctx, branchId: string) {
   const monthEnd = localDayUtcRange(nextMonth, branch.timezone).start;
   const revenue = await one<{ s: number }>(
     ctx.db,
-    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+    `SELECT ${NET_AMOUNT} AS s
      FROM payment_lines pl
      JOIN payments p ON p.id = pl.payment_id
-     WHERE p.branch_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.branch_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type IN ('service', 'deposit')
        AND p.posted_at >= $2 AND p.posted_at < $3`,
     [branchId, range.start.toISOString(), monthEnd.toISOString()],
@@ -24,10 +25,10 @@ export async function dashboard(ctx: Ctx, branchId: string) {
   const series = await many<{ day: string; total: number }>(
     ctx.db,
     `SELECT to_char((p.posted_at AT TIME ZONE $4)::date, 'YYYY-MM-DD') AS day,
-            COALESCE(SUM(pl.amount_minor), 0)::int AS total
+            ${NET_AMOUNT} AS total
      FROM payments p
      JOIN payment_lines pl ON pl.payment_id = p.id
-     WHERE p.branch_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.branch_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type IN ('service', 'deposit')
        AND p.posted_at >= $2 AND p.posted_at < $3
      GROUP BY 1 ORDER BY 1`,
@@ -74,15 +75,15 @@ export async function dashboard(ctx: Ctx, branchId: string) {
     ctx.db,
     `SELECT COUNT(*)::int AS n, COALESCE(SUM(total_minor), 0)::int AS total
      FROM payments
-     WHERE branch_id = $1 AND status = 'posted' AND direction = 'in'
+     WHERE branch_id = $1 AND status IN ('posted', 'refunded') AND direction = 'in'
        AND posted_at >= $2 AND posted_at < $3`,
     [branchId, range.start.toISOString(), monthEnd.toISOString()],
   );
   const todayPaid = await one<{ s: number }>(
     ctx.db,
-    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+    `SELECT ${NET_AMOUNT} AS s
      FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
-     WHERE p.branch_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.branch_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type IN ('service', 'deposit')
        AND p.posted_at >= $2 AND p.posted_at < $3`,
     [branchId, localDayUtcRange(today, branch.timezone).start.toISOString(), localDayUtcRange(today, branch.timezone).end.toISOString()],

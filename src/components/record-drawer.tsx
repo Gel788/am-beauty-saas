@@ -6,6 +6,7 @@ import { formatPhone } from "@/domain/phone";
 import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
 import { zonedDateTimeToUtc } from "@/domain/time";
 import { api, type ApiError } from "./api";
+import { PaymentRow, type PaymentItem } from "./payment-actions";
 import { Modal, useToast } from "./ui";
 
 type Line = { serviceId: string; title: string; durationMin: number; priceMinor: number };
@@ -26,12 +27,15 @@ export function RecordDrawer({
   timezone,
   onClose,
   onSaved,
+  onRefresh,
 }: {
   seed: DrawerSeed;
   branchId: string;
   timezone: string;
   onClose: () => void;
   onSaved: () => void;
+  /** Refresh the journal behind the drawer without closing it. */
+  onRefresh?: () => void;
 }) {
   const toast = useToast();
   const [loading, setLoading] = useState(Boolean(seed.id));
@@ -62,6 +66,9 @@ export function RecordDrawer({
   const [tipRub, setTipRub] = useState("");
   const [source, setSource] = useState("admin");
   const [busy, setBusy] = useState(false);
+  const [ledger, setLedger] = useState<PaymentItem[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [refundHint, setRefundHint] = useState(false);
 
   const mark = () => setDirty(true);
   const duration = lines.reduce((sum, line) => sum + line.durationMin, 0) || 30;
@@ -93,6 +100,7 @@ export function RecordDrawer({
       actions: { id: string; label: string; enabled: boolean; reason: string | null }[];
       history: { action: string; createdAt: string }[];
     }>(`/api/appointments/${seed.id}`).then((row) => {
+      api<PaymentItem[]>(`/api/appointments/${seed.id}/payments`).then(setLedger).catch(() => setLedger([]));
       setVersion(row.version);
       setStatus(row.status);
       setClientId(row.clientId);
@@ -113,7 +121,7 @@ export function RecordDrawer({
       setLoading(false);
       setDirty(false);
     }).catch((error: ApiError) => toast(error.message, "error"));
-  }, [seed.id, seed.staffId, seed.date, branchId, timezone, toast]);
+  }, [seed.id, seed.staffId, seed.date, branchId, timezone, toast, reloadKey]);
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -213,9 +221,20 @@ export function RecordDrawer({
     const reason = window.prompt("Причина отмены");
     if (!reason) return;
     try {
-      await api(`/api/appointments/${seed.id}/cancel`, { method: "POST", body: JSON.stringify({ version, reason, confirm: true }) });
+      const result = await api<{ version: number; refundSuggested?: boolean }>(`/api/appointments/${seed.id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ version, reason, confirm: true }),
+      });
       toast("Запись отменена");
-      onSaved();
+      if (result.refundSuggested) {
+        // CASH §9: cancelling a prepaid visit offers PAY-REFUND right here.
+        setStatus("cancelled");
+        setVersion(result.version);
+        setRefundHint(true);
+        setTab("pay");
+        setReloadKey((key) => key + 1);
+        onRefresh?.();
+      } else onSaved();
     } catch (error) {
       toast((error as ApiError).message, "error");
     }
@@ -346,20 +365,46 @@ export function RecordDrawer({
           </div>
         ) : tab === "pay" ? (
           <div className="list">
-            <div className="stat-pill"><span>К оплате</span><b>{formatMoney(Math.max(0, price - paidMinor))}</b></div>
-            <div className="muted">Оплачено {formatMoney(paidMinor)} из {formatMoney(price)}</div>
-            <div className="field"><label>Сумма, ₽</label><input value={payRub} onChange={(event) => setPayRub(event.target.value)} /></div>
-            <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>
-            <div className="field">
-              <label>Способ</label>
-              <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>
-                <option value="card">Карта</option>
-                <option value="cash">Наличные</option>
-                <option value="sbp">СБП</option>
-                <option value="transfer">Перевод</option>
-              </select>
-            </div>
-            <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>Провести</button>
+            {refundHint && ledger.some((item) => item.canRefund) && (
+              <div className="banner">Запись отменена, но по ней есть оплата. Оформите возврат ниже.</div>
+            )}
+            {paidMinor > price && status !== "cancelled" && (
+              <div className="banner">Оплачено больше стоимости на {formatMoney(paidMinor - price)}. Верните разницу.</div>
+            )}
+            {status !== "cancelled" && (
+              <>
+                <div className="stat-pill"><span>К оплате</span><b>{formatMoney(Math.max(0, price - paidMinor))}</b></div>
+                <div className="muted">Оплачено {formatMoney(paidMinor)} из {formatMoney(price)}</div>
+                <div className="field"><label>Сумма, ₽</label><input value={payRub} onChange={(event) => setPayRub(event.target.value)} /></div>
+                <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>
+                <div className="field">
+                  <label>Способ</label>
+                  <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>
+                    <option value="card">Карта</option>
+                    <option value="cash">Наличные</option>
+                    <option value="sbp">СБП</option>
+                    <option value="transfer">Перевод</option>
+                  </select>
+                </div>
+                <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>Провести</button>
+              </>
+            )}
+            {ledger.length > 0 && (
+              <div className="drawer-pay-list">
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Платежи по записи</div>
+                {ledger.map((payment) => (
+                  <PaymentRow
+                    key={payment.id}
+                    payment={payment}
+                    compact
+                    onChanged={() => {
+                      setReloadKey((key) => key + 1);
+                      onRefresh?.();
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="list">

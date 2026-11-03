@@ -8,6 +8,12 @@ type TenderInput = { method: "cash" | "card" | "sbp" | "transfer" | "bonus" | "c
 
 const ALLOWED = new Set(["cash", "card", "sbp", "transfer"]);
 
+/** Payments that still carry money: posted, or refunded originals (their refunds are separate `out` rows). */
+export const LIVE_PAYMENT = "p.status IN ('posted', 'refunded')";
+/** Signed line sum: incoming minus refunds. Use with alias `pl` for lines and `p` for payments. */
+export const NET_AMOUNT =
+  "COALESCE(SUM(CASE WHEN p.direction = 'in' THEN pl.amount_minor ELSE -pl.amount_minor END), 0)::int";
+
 export async function syncAppointmentDebt(ctx: Ctx, appointmentId: string) {
   const appt = await one<{ id: string; client_id: string | null; debt_minor: number; status: string }>(
     ctx.db,
@@ -22,19 +28,19 @@ export async function syncAppointmentDebt(ctx: Ctx, appointmentId: string) {
   );
   const paidRow = await one<{ s: number }>(
     ctx.db,
-    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+    `SELECT ${NET_AMOUNT} AS s
      FROM payment_lines pl
      JOIN payments p ON p.id = pl.payment_id
-     WHERE p.appointment_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type IN ('service', 'deposit')`,
     [appointmentId],
   );
   const settlementRow = await one<{ s: number }>(
     ctx.db,
-    `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+    `SELECT ${NET_AMOUNT} AS s
      FROM payment_lines pl
      JOIN payments p ON p.id = pl.payment_id
-     WHERE p.appointment_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+     WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT}
        AND pl.line_type = 'service'`,
     [appointmentId],
   );
@@ -71,19 +77,17 @@ export async function clearAppointmentDebt(ctx: Ctx, appointmentId: string): Pro
   await ctx.db.query("UPDATE appointments SET debt_minor = 0 WHERE id = $1", [appointmentId]);
 }
 
-async function requireShift(ctx: Ctx, branchId: string, bypassShift?: boolean) {
+export async function requireShift(ctx: Ctx, branchId: string, bypassShift?: boolean) {
   const branch = await loadBranch(ctx, branchId);
-  const closing = await one<{ id: string }>(
+  // FOR SHARE serialises with SHIFT-CLOSE-01: closing waits for in-flight payments, and
+  // payments started after closing began see status = 'closing'.
+  const active = await one<{ id: string; status: string }>(
     ctx.db,
-    "SELECT id FROM cash_shifts WHERE branch_id = $1 AND status = 'closing'",
+    "SELECT id, status FROM cash_shifts WHERE branch_id = $1 AND status IN ('open', 'closing') FOR SHARE",
     [branchId],
   );
-  if (closing) throw new AppError("SHIFT_CLOSED", "Смена закрывается, оплата недоступна");
-  const open = await one<{ id: string }>(
-    ctx.db,
-    "SELECT id FROM cash_shifts WHERE branch_id = $1 AND status = 'open'",
-    [branchId],
-  );
+  if (active?.status === "closing") throw new AppError("SHIFT_CLOSED", "Смена закрывается, оплата недоступна");
+  const open = active?.status === "open" ? active : null;
   if (branch.require_open_shift && !open) {
     if (bypassShift && ctx.actor.role === "owner" && branch.owner_can_bypass_shift) {
       return { shiftId: null as string | null, branch };
@@ -93,7 +97,7 @@ async function requireShift(ctx: Ctx, branchId: string, bypassShift?: boolean) {
   return { shiftId: open?.id ?? null, branch };
 }
 
-function assertMoney(value: number, label: string) {
+export function assertMoney(value: number, label: string) {
   if (!Number.isInteger(value) || value < 0 || value > 1_000_000_000) {
     throw new AppError("VALIDATION", `${label}: сумма в копейках должна быть целым числом`);
   }
@@ -110,11 +114,12 @@ export async function openShift(
   assertMoney(input.openingCashMinor, "Сумма в кассе");
   const existing = await one<{ id: string; opened_at: Date }>(
     ctx.db,
-    "SELECT id, opened_at FROM cash_shifts WHERE branch_id = $1 AND status = 'open'",
+    "SELECT id, opened_at, status FROM cash_shifts WHERE branch_id = $1 AND status IN ('open', 'closing')",
     [input.branchId],
   );
   if (existing) {
-    throw new AppError("VALIDATION", "Смена уже открыта", {
+    const closing = (existing as { status?: string }).status === "closing";
+    throw new AppError("VALIDATION", closing ? "Текущая смена закрывается. Завершите закрытие" : "Смена уже открыта. Закройте её, чтобы открыть новую", {
       shiftId: existing.id,
       openedAt: new Date(existing.opened_at).toISOString(),
     });
@@ -133,30 +138,6 @@ export async function openShift(
     diff: { openingCashMinor: input.openingCashMinor },
   });
   return { id, status: "open" as const, openingCashMinor: input.openingCashMinor };
-}
-
-export async function currentShift(ctx: Ctx, branchId: string) {
-  await loadBranch(ctx, branchId);
-  const row = await one<{
-    id: string;
-    status: string;
-    opening_cash_minor: number;
-    opened_at: Date;
-    note: string;
-  }>(
-    ctx.db,
-    `SELECT id, status, opening_cash_minor, opened_at, note
-     FROM cash_shifts WHERE branch_id = $1 AND status = 'open'`,
-    [branchId],
-  );
-  if (!row) return null;
-  return {
-    id: row.id,
-    status: row.status,
-    openingCashMinor: Number(row.opening_cash_minor),
-    openedAt: new Date(row.opened_at).toISOString(),
-    note: row.note,
-  };
 }
 
 export async function createPayment(
@@ -250,9 +231,9 @@ export async function createPayment(
     const price = services.rows.reduce((sum, service) => sum + Number(service.price_minor), 0);
     const paidRow = await one<{ s: number }>(
       ctx.db,
-      `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+      `SELECT ${NET_AMOUNT} AS s
        FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
-       WHERE p.appointment_id = $1 AND p.status = 'posted' AND p.direction = 'in'
+       WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT}
          AND pl.line_type IN ('service', 'deposit')`,
       [appointmentId],
     );
@@ -292,9 +273,9 @@ export async function createPayment(
       for (const service of services.rows) {
         const paidService = await one<{ s: number }>(
           ctx.db,
-          `SELECT COALESCE(SUM(pl.amount_minor), 0)::int AS s
+          `SELECT ${NET_AMOUNT} AS s
            FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
-           WHERE p.appointment_id = $1 AND p.status = 'posted' AND pl.ref_id = $2 AND pl.line_type = 'service'`,
+           WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT} AND pl.ref_id = $2 AND pl.line_type = 'service'`,
           [appointmentId, service.id],
         );
         const due = Number(service.price_minor) - Number(paidService?.s ?? 0);
@@ -368,7 +349,15 @@ function storedTenders(tenders: TenderInput[], change: number) {
   return stored;
 }
 
-async function insertPayment(
+export type PaymentLineInput = {
+  type: string;
+  refId: string | null;
+  title: string;
+  amountMinor: number;
+  refundOfLineId?: string | null;
+};
+
+export async function insertPayment(
   ctx: Ctx,
   input: {
     branchId: string;
@@ -377,10 +366,14 @@ async function insertPayment(
     shiftId: string | null;
     total: number;
     change: number;
-    lines: { type: string; refId: string | null; title: string; amountMinor: number }[];
+    lines: PaymentLineInput[];
     tenders: { method: string; amountMinor: number }[];
+    direction?: "in" | "out";
+    refundOfId?: string | null;
+    refundReason?: string | null;
   },
 ) {
+  const direction = input.direction ?? "in";
   const tenderSum = input.tenders.reduce((sum, tender) => sum + tender.amountMinor, 0);
   if (tenderSum !== input.total) {
     throw new AppError("VALIDATION", "Сумма оплат не сходится с чеком");
@@ -389,8 +382,8 @@ async function insertPayment(
   await ctx.db.query(
     `INSERT INTO payments (
        id, tenant_id, branch_id, appointment_id, client_id, shift_id, direction, status,
-       total_minor, change_minor, created_by, posted_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,'in','posted',$7,$8,$9, now())`,
+       total_minor, change_minor, created_by, posted_at, refund_of_id, refund_reason
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'posted',$8,$9,$10, now(), $11, $12)`,
     [
       id,
       ctx.actor.tenantId,
@@ -398,16 +391,28 @@ async function insertPayment(
       input.appointmentId,
       input.clientId,
       input.shiftId,
+      direction,
       input.total,
       input.change,
       ctx.actor.userId,
+      input.refundOfId ?? null,
+      input.refundReason ?? null,
     ],
   );
   for (const line of input.lines) {
     await ctx.db.query(
-      `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, ref_id, title, amount_minor)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [crypto.randomUUID(), ctx.actor.tenantId, id, line.type, line.refId, line.title, line.amountMinor],
+      `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, ref_id, title, amount_minor, refund_of_line_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        crypto.randomUUID(),
+        ctx.actor.tenantId,
+        id,
+        line.type,
+        line.refId,
+        line.title,
+        line.amountMinor,
+        line.refundOfLineId ?? null,
+      ],
     );
   }
   for (const tender of input.tenders) {
@@ -417,48 +422,14 @@ async function insertPayment(
       [crypto.randomUUID(), ctx.actor.tenantId, id, tender.method, tender.amountMinor],
     );
   }
-  await audit(ctx, {
-    branchId: input.branchId,
-    entity: "payment",
-    entityId: id,
-    action: "payment.posted",
-    diff: { totalMinor: input.total, changeMinor: input.change, appointmentId: input.appointmentId },
-  });
-  return { id, totalMinor: input.total, changeMinor: input.change, status: "posted" as const };
-}
-
-export async function listPayments(ctx: Ctx, branchId: string, date?: string) {
-  await loadBranch(ctx, branchId);
-  if (!["owner", "admin", "accountant"].includes(ctx.actor.role)) {
-    throw new AppError("FORBIDDEN", "Недостаточно прав");
+  if (direction === "in") {
+    await audit(ctx, {
+      branchId: input.branchId,
+      entity: "payment",
+      entityId: id,
+      action: "payment.posted",
+      diff: { totalMinor: input.total, changeMinor: input.change, appointmentId: input.appointmentId, shiftId: input.shiftId },
+    });
   }
-  const rows = await ctx.db.query<{
-    id: string;
-    total_minor: number;
-    change_minor: number;
-    status: string;
-    posted_at: Date | null;
-    appointment_id: string | null;
-    client_id: string | null;
-    client_name: string | null;
-  }>(
-    `SELECT p.id, p.total_minor, p.change_minor, p.status, p.posted_at, p.appointment_id, p.client_id, c.name AS client_name
-     FROM payments p
-     LEFT JOIN clients c ON c.id = p.client_id
-     WHERE p.branch_id = $1
-       AND ($2::date IS NULL OR (p.posted_at AT TIME ZONE (SELECT timezone FROM branches WHERE id = $1))::date = $2::date)
-     ORDER BY p.posted_at DESC
-     LIMIT 100`,
-    [branchId, date ?? null],
-  );
-  return rows.rows.map((row) => ({
-    id: row.id,
-    totalMinor: Number(row.total_minor),
-    changeMinor: Number(row.change_minor),
-    status: row.status,
-    postedAt: row.posted_at ? new Date(row.posted_at).toISOString() : null,
-    appointmentId: row.appointment_id,
-    clientId: row.client_id,
-    clientName: row.client_name,
-  }));
+  return { id, totalMinor: input.total, changeMinor: input.change, status: "posted" as const };
 }

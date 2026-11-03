@@ -472,6 +472,9 @@ export function JournalBoard() {
             setLoading(true);
             api<Journal>(`/api/journal?date=${date}&branchId=${branchId}&showOff=${showOff ? "1" : "0"}&showCancelled=${showCancelled ? "1" : "0"}`).then(setJournal).finally(() => setLoading(false));
           }}
+          onRefresh={() => {
+            api<Journal>(`/api/journal?date=${date}&branchId=${branchId}&showOff=${showOff ? "1" : "0"}&showCancelled=${showCancelled ? "1" : "0"}`).then(setJournal).catch(() => undefined);
+          }}
         />
       )}
     </>

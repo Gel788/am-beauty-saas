@@ -18,6 +18,7 @@ type Branch = {
   noShowGraceMin: number;
   gridLabelMin: number;
   requirePaymentOnComplete: boolean;
+  shiftVarianceThresholdMinor: number;
 };
 
 export function SettingsView() {
@@ -50,6 +51,11 @@ export function SettingsView() {
         <label className="row"><input type="checkbox" checked={branch.masterCanDragOwn} onChange={(event) => set("masterCanDragOwn", event.target.checked)} /> Мастер перетаскивает свои записи</label>
         <label className="row"><input type="checkbox" checked={branch.requirePaymentOnComplete} onChange={(event) => set("requirePaymentOnComplete", event.target.checked)} /> Предлагать оплату при завершении</label>
         <div className="field"><label>Окно «пришёл», часы</label><input type="number" value={branch.arrivalWindowHours} onChange={(event) => set("arrivalWindowHours", Number(event.target.value))} /></div>
+        <div className="field">
+          <label>Допустимое расхождение при закрытии смены, ₽</label>
+          <input type="number" min={0} step="0.01" value={branch.shiftVarianceThresholdMinor / 100} onChange={(event) => set("shiftVarianceThresholdMinor", Math.max(0, Math.round(Number(event.target.value) * 100)))} />
+          <span className="muted" style={{ fontSize: 12 }}>Если расхождение больше — кассир обязан указать причину. 0 — причина нужна при любом расхождении.</span>
+        </div>
         <div className="field"><label>Неявка после, минут</label><input type="number" value={branch.noShowGraceMin} onChange={(event) => set("noShowGraceMin", Number(event.target.value))} /></div>
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>

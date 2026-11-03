@@ -389,11 +389,12 @@ export async function clientHistory(ctx: Ctx, clientId: string, branchId?: strin
     id: string;
     total_minor: number;
     status: string;
+    direction: string;
     posted_at: Date | null;
     appointment_id: string | null;
   }>(
     ctx.db,
-    `SELECT id, total_minor, status, posted_at, appointment_id
+    `SELECT id, total_minor, status, direction, posted_at, appointment_id
      FROM payments
      WHERE client_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
      ORDER BY created_at DESC`,
@@ -415,6 +416,7 @@ export async function clientHistory(ctx: Ctx, clientId: string, branchId?: strin
       id: payment.id,
       totalMinor: Number(payment.total_minor),
       status: payment.status,
+      direction: payment.direction,
       postedAt: payment.posted_at ? new Date(payment.posted_at).toISOString() : null,
       appointmentId: payment.appointment_id,
     })),
