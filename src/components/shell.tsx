@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Banknote, BarChart3, Boxes, CalendarDays, LayoutDashboard, Scissors, Settings, Sparkles, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Boxes, Gift, CalendarDays, LayoutDashboard, Scissors, Settings, Sparkles, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
@@ -22,6 +22,7 @@ const LINKS = [
   { href: "/staff", label: "Мастера", icon: UserRound },
   { href: "/cash", label: "Финансы", icon: Wallet },
   { href: "/inventory", label: "Склад", icon: Boxes },
+  { href: "/loyalty", label: "Лояльность", icon: Gift },
   { href: "/reports", label: "Отчёт дня", icon: BarChart3 },
   { href: "/payroll", label: "Зарплаты", icon: Banknote },
   { href: "/settings", label: "Настройки", icon: Settings },

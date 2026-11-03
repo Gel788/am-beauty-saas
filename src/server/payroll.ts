@@ -468,6 +468,7 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
     service_id: string | null;
     title: string;
     price_minor: number;
+    list_price_minor: number;
     staff_id: string;
     staff_name: string;
     completed_at: Date;
@@ -478,6 +479,7 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
   }>(
     ctx.db,
     `SELECT a.id AS appointment_id, s.id AS appointment_service_id, s.service_id, s.title_snapshot AS title, s.price_minor,
+            COALESCE(s.price_before_promo_minor, s.price_minor) AS list_price_minor,
             a.staff_id, st.display_name AS staff_name, a.completed_at, a.force_overlap,
             (SELECT COALESCE(SUM(price_minor), 0)::int FROM appointment_services WHERE appointment_id = a.id) AS appointment_price,
             (SELECT COALESCE(SUM(CASE WHEN p.direction = 'in' THEN pl.amount_minor ELSE -pl.amount_minor END), 0)::int
@@ -518,7 +520,8 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
       continue;
     }
     if (rule.scheme === "salary") continue;
-    const gross = rule.base === "paid_amount" ? paid : price;
+    // service_price is the list price before a promo; price_after_discount is what the visit cost.
+    const gross = rule.base === "paid_amount" ? paid : rule.base === "price_after_discount" ? price : Number(row.list_price_minor);
     // PAYROLL-SCHEME-05: the cost of materials comes off the base, never below zero.
     const materialsMinor = rule.deduct_materials ? (materials.get(row.appointment_service_id) ?? 0) : 0;
     const base = Math.max(0, gross - materialsMinor);

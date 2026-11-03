@@ -15,6 +15,7 @@ import { audit } from "./audit";
 import { many, one, poolOne, withSession } from "./db";
 import { loadWorkingIntervals } from "./hours";
 import type { Actor, BranchRow, Ctx } from "./types";
+import { applyPromo } from "./loyalty";
 
 /** The online channel acts under this fixed id: it has no user row, like the system actor in audit. */
 export const ONLINE_ACTOR_ID = "00000000-0000-0000-0000-0000000000b0";
@@ -375,7 +376,7 @@ async function findOrCreateClient(ctx: Ctx, name: string, phone: string) {
 export async function confirmBooking(
   ctx: Ctx,
   branchId: string,
-  input: { holdId: string; name: string; phone: string; comment?: string; idempotencyKey?: string },
+  input: { holdId: string; name: string; phone: string; comment?: string; idempotencyKey?: string; promoCode?: string },
 ) {
   const branch = await loadOnlineBranch(ctx, branchId);
   const hold = await one<HoldRow>(ctx.db, "SELECT * FROM slot_holds WHERE id = $1 AND branch_id = $2 FOR UPDATE", [
@@ -440,6 +441,9 @@ export async function confirmBooking(
     throw error;
   }
 
+  let promo: { code: string; discountMinor: number; priceMinor: number } | null = null;
+  if (input.promoCode?.trim()) promo = await applyPromo(ctx, appointment.id, input.promoCode, { online: true });
+
   const token = randomBytes(32).toString("hex");
   await ctx.db.query("UPDATE appointments SET cancel_token_hash = $2 WHERE id = $1", [appointment.id, sha256(token)]);
   const cancelUntil = new Date(new Date(appointment.startsAt).getTime() - Number(branch.online_cancel_hours) * 3600000);
@@ -450,7 +454,8 @@ export async function confirmBooking(
     endsAt: appointment.endsAt,
     staffName: staff.display_name,
     serviceTitle: service.title,
-    priceMinor: appointment.priceMinor,
+    priceMinor: promo ? promo.priceMinor : appointment.priceMinor,
+    promo: promo ? { code: promo.code, discountMinor: promo.discountMinor } : null,
     clientName: name,
     cancelToken: token,
     cancelUntil: cancelUntil.toISOString(),

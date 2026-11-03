@@ -20,6 +20,7 @@ type Report = {
     otherMinor: number;
     refundsMinor: number;
     byMethod: { method: string; netMinor: number }[];
+    paidByLoyaltyMinor: number;
   };
   appointments: { total: number; createdToday: number; createdOnline: number; completed: number; cancelled: number; noShow: number; open: number; online: number };
   load: {
@@ -32,7 +33,7 @@ type Report = {
   appointmentList: { id: string; time: string; staffName: string; clientName: string | null; title: string; status: string; source: string; priceMinor: number }[];
 };
 
-const METHODS: Record<string, string> = { cash: "Наличные", card: "Карта", sbp: "СБП", transfer: "Перевод", bonus: "Бонусы", certificate: "Сертификат" };
+const METHODS: Record<string, string> = { cash: "Наличные", card: "Карта", sbp: "СБП", transfer: "Перевод", bonus: "Бонусы", certificate: "Сертификат", membership: "Абонемент" };
 
 function hours(minutes: number) {
   const h = Math.floor(minutes / 60);
@@ -102,7 +103,11 @@ export function ReportsView() {
             <div className="panel report-tile">
               <span className="muted">Выручка за день</span>
               <b className="display">{money(report.revenue.totalMinor)}</b>
-              <small className="muted">поступило по оплатам, за вычетом возвратов</small>
+              <small className="muted">
+                {report.revenue.paidByLoyaltyMinor
+                  ? `деньгами ${money(report.revenue.totalMinor - report.revenue.paidByLoyaltyMinor)}, бонусами, сертификатами и абонементами ${money(report.revenue.paidByLoyaltyMinor)}`
+                  : "поступило по оплатам, за вычетом возвратов"}
+              </small>
             </div>
             <div className="panel report-tile">
               <span className="muted">Записей на день</span>
@@ -123,7 +128,7 @@ export function ReportsView() {
               <div className="spread"><span>Товары и прочий приход</span><b>{money(report.revenue.productsMinor)}</b></div>
               <div className="spread"><span>Чаевые</span><b>{money(report.revenue.tipsMinor)}</b></div>
               {report.revenue.debtRepaidMinor !== 0 && <div className="spread"><span>Погашение долгов</span><b>{money(report.revenue.debtRepaidMinor)}</b></div>}
-              {report.revenue.otherMinor !== 0 && <div className="spread"><span>Прочее</span><b>{money(report.revenue.otherMinor)}</b></div>}
+              {report.revenue.otherMinor !== 0 && <div className="spread"><span>Продажа сертификатов и абонементов</span><b>{money(report.revenue.otherMinor)}</b></div>}
               {report.revenue.refundsMinor > 0 && <div className="spread muted"><span>Возвраты (уже вычтены)</span><span>−{money(report.revenue.refundsMinor)}</span></div>}
               <h2 className="report-h">По способам оплаты</h2>
               {report.revenue.byMethod.length === 0 && <span className="muted">Оплат не было</span>}

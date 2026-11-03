@@ -12,7 +12,7 @@ type Totals = {
   openingCashMinor: number;
   byMethod: Record<Method, { inMinor: number; outMinor: number; netMinor: number }>;
   expected: Record<Method, number>;
-  revenue: { servicesMinor: number; productsMinor: number; tipsMinor: number; debtRepaidMinor: number };
+  revenue: { servicesMinor: number; productsMinor: number; tipsMinor: number; debtRepaidMinor: number; loyaltySalesMinor?: number };
   incomeMinor: number;
   refundsMinor: number;
   changeGivenMinor: number;
@@ -221,6 +221,7 @@ function Breakdown({ totals }: { totals: Totals }) {
     ["Прочий приход", totals.revenue.productsMinor],
     ["Чаевые", totals.revenue.tipsMinor],
     ["Погашение долгов", totals.revenue.debtRepaidMinor],
+    ...(totals.revenue.loyaltySalesMinor ? ([["Сертификаты и абонементы", totals.revenue.loyaltySalesMinor]] as [string, number][]) : []),
   ];
   return (
     <div className="list">
@@ -488,7 +489,13 @@ type SaleItem = { id: string; title: string; sellPriceMinor: number; forSale: bo
 
 function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [mode, setMode] = useState<"goods" | "free">("goods");
+  const [mode, setMode] = useState<"goods" | "free" | "cert" | "sub">("goods");
+  const [plans, setPlans] = useState<{ id: string; title: string; visits: number; validDays: number; priceMinor: number; active: boolean }[]>([]);
+  const [planId, setPlanId] = useState("");
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientHits, setClientHits] = useState<{ id: string; name: string }[]>([]);
+  const [client, setClient] = useState<{ id: string; name: string } | null>(null);
+  const [issuedCode, setIssuedCode] = useState("");
   const [goods, setGoods] = useState<SaleItem[]>([]);
   const [itemId, setItemId] = useState("");
   const [qty, setQty] = useState("1");
@@ -504,20 +511,81 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
         if (!forSale.length) setMode("free");
       })
       .catch(() => setMode("free"));
+    api<typeof plans>("/api/loyalty/plans").then((rows) => setPlans(rows.filter((plan) => plan.active))).catch(() => setPlans([]));
   }, [branchId]);
+  useEffect(() => {
+    if (clientQuery.trim().length < 2) return setClientHits([]);
+    const timer = window.setTimeout(() => {
+      api<{ id: string; name: string }[]>(`/api/clients?q=${encodeURIComponent(clientQuery)}`).then(setClientHits).catch(() => setClientHits([]));
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [clientQuery]);
+  const plan = plans.find((entry) => entry.id === planId);
   const item = goods.find((entry) => entry.id === itemId);
   const count = Number(qty.replace(",", ".")) || 0;
-  const amount = mode === "goods" ? (item ? Math.round(item.sellPriceMinor * count) : 0) : parseRub(rub || "0");
+  const amount =
+    mode === "goods" ? (item ? Math.round(item.sellPriceMinor * count) : 0) : mode === "sub" ? (plan?.priceMinor ?? 0) : parseRub(rub || "0");
+  const clientPicker = (
+    <div className="field">
+      <label>Клиент{mode === "cert" ? " (необязательно)" : ""}</label>
+      {client ? (
+        <div className="spread chip"><span>{client.name}</span><button type="button" className="btn-ghost" onClick={() => setClient(null)}>Сменить</button></div>
+      ) : (
+        <>
+          <input value={clientQuery} onChange={(event) => setClientQuery(event.target.value)} placeholder="Имя или телефон" />
+          {clientHits.slice(0, 5).map((hit) => (
+            <button key={hit.id} type="button" className="person" onClick={() => { setClient(hit); setClientQuery(""); setClientHits([]); }}>
+              <div><strong>{hit.name}</strong></div>
+            </button>
+          ))}
+        </>
+      )}
+    </div>
+  );
+  if (issuedCode) {
+    return (
+      <Modal title="Сертификат выдан" onClose={onDone}>
+        <div className="list">
+          <p className="muted">Передайте код клиенту. По нему сертификатом можно оплатить визит или товар.</p>
+          <div className="display" style={{ fontSize: 34, letterSpacing: 2, textAlign: "center" }}>{issuedCode}</div>
+          <button className="btn-gradient" type="button" onClick={onDone}>Готово</button>
+        </div>
+      </Modal>
+    );
+  }
   return (
-    <Modal title="Приход без записи" onClose={onClose}>
+    <Modal title="Продажа без записи" onClose={onClose}>
       <div className="list">
-        {goods.length > 0 && (
-          <div className="segment">
-            <button type="button" className={mode === "goods" ? "on" : ""} onClick={() => setMode("goods")}>Товар со склада</button>
-            <button type="button" className={mode === "free" ? "on" : ""} onClick={() => setMode("free")}>Своя сумма</button>
-          </div>
-        )}
-        {mode === "goods" ? (
+        <div className="segment">
+          {goods.length > 0 && <button type="button" className={mode === "goods" ? "on" : ""} onClick={() => setMode("goods")}>Товар</button>}
+          <button type="button" className={mode === "cert" ? "on" : ""} onClick={() => setMode("cert")}>Сертификат</button>
+          {plans.length > 0 && <button type="button" className={mode === "sub" ? "on" : ""} onClick={() => setMode("sub")}>Абонемент</button>}
+          <button type="button" className={mode === "free" ? "on" : ""} onClick={() => setMode("free")}>Своя сумма</button>
+        </div>
+        {mode === "cert" ? (
+          <>
+            <div className="field"><label>Номинал, ₽</label><input inputMode="decimal" value={rub} onChange={(event) => setRub(event.target.value)} autoFocus /></div>
+            <div className="chips">
+              {[3000, 5000, 10000].map((value) => (
+                <button key={value} type="button" className="chip" onClick={() => setRub(String(value))}>{formatMoney(value * 100)}</button>
+              ))}
+            </div>
+            {clientPicker}
+          </>
+        ) : mode === "sub" ? (
+          <>
+            <div className="field">
+              <label>Абонемент</label>
+              <select value={planId} onChange={(event) => setPlanId(event.target.value)}>
+                <option value="">Выберите абонемент</option>
+                {plans.map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.title} · {entry.visits} виз. · {entry.validDays} дн. · {formatMoney(entry.priceMinor)}</option>
+                ))}
+              </select>
+            </div>
+            {clientPicker}
+          </>
+        ) : mode === "goods" ? (
           <>
             <div className="field">
               <label>Товар</label>
@@ -548,16 +616,23 @@ function IncomeModal({ branchId, onClose, onDone }: { branchId: string; onClose:
           <button
             className="btn-gradient"
             type="button"
-            disabled={busy || amount <= 0}
+            disabled={busy || amount <= 0 || (mode === "sub" && !client)}
             onClick={async () => {
               setBusy(true);
               try {
+                const tenders = [{ method, amountMinor: amount }];
                 const body =
                   mode === "goods"
-                    ? { branchId, kind: "misc", items: [{ itemId, qty: count }], tenders: [{ method, amountMinor: amount }] }
-                    : { branchId, kind: "misc", title, tenders: [{ method, amountMinor: amount }] };
-                await api("/api/payments", { method: "POST", body: JSON.stringify(body) });
-                toast(mode === "goods" ? "Продажа проведена, остаток списан" : "Приход проведён");
+                    ? { branchId, kind: "misc", items: [{ itemId, qty: count }], tenders }
+                    : mode === "cert"
+                      ? { branchId, kind: "certificate", amountMinor: amount, clientId: client?.id, tenders }
+                      : mode === "sub"
+                        ? { branchId, kind: "membership", planId, clientId: client?.id, tenders }
+                        : { branchId, kind: "misc", title, tenders };
+                const result = await api<{ issued?: { kind: string; code?: string }[] }>("/api/payments", { method: "POST", body: JSON.stringify(body) });
+                const code = result.issued?.find((entry) => entry.code)?.code;
+                if (code) return setIssuedCode(code);
+                toast(mode === "goods" ? "Продажа проведена, остаток списан" : mode === "sub" ? `Абонемент оформлен на ${client?.name}` : "Приход проведён");
                 onDone();
               } catch (err) {
                 toast((err as ApiError).message, "error");

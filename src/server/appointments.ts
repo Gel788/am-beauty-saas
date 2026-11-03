@@ -18,6 +18,7 @@ import { loadWorkingIntervals } from "./hours";
 import { LIVE_PAYMENT, NET_AMOUNT, clearAppointmentDebt, syncAppointmentDebt } from "./payments";
 import type { BranchRow, Ctx } from "./types";
 import { consumeForAppointment } from "./inventory";
+import { releasePromo } from "./loyalty";
 
 type ServiceInput = { serviceId: string; durationMin?: number };
 
@@ -251,6 +252,8 @@ async function writeLines(
   appointmentId: string,
   lines: { serviceId: string; title: string; durationMin: number; priceMinor: number }[],
 ) {
+  // New services mean new prices: a promo applied to the old ones no longer holds.
+  await releasePromo(ctx, appointmentId, { restorePrices: false, reason: "услуги изменены" });
   await ctx.db.query("DELETE FROM appointment_services WHERE appointment_id = $1", [appointmentId]);
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -407,6 +410,12 @@ export async function getAppointment(ctx: Ctx, id: string) {
     : null;
   const paid = await paidMinor(ctx, id);
   const price = lines.reduce((sum, line) => sum + line.priceMinor, 0);
+  const promo = await one<{ code: string; discount_minor: number }>(
+    ctx.db,
+    `SELECT p.code, r.discount_minor FROM promo_redemptions r JOIN promo_codes p ON p.id = r.promo_id
+     WHERE r.appointment_id = $1 AND r.released_at IS NULL`,
+    [id],
+  );
   return {
     id: row.id,
     branchId: row.branch_id,
@@ -431,6 +440,7 @@ export async function getAppointment(ctx: Ctx, id: string) {
     services: lines,
     priceMinor: price,
     paidMinor: paid,
+    promo: promo ? { code: promo.code, discountMinor: Number(promo.discount_minor) } : null,
     actions: statusActions(row, ctx, branch),
     history: await listAudit(ctx, "appointment", id),
   };
@@ -794,6 +804,7 @@ export async function cancelAppointment(
     throw new AppError("VALIDATION", "Укажите причину отмены");
   }
   await clearAppointmentDebt(ctx, id);
+  await releasePromo(ctx, id, { reason: "запись отменена" });
   await ctx.db.query(
     `UPDATE appointments SET status = 'cancelled', cancel_reason = $2, cancelled_by = $3,
        version = version + 1, updated_by = $3, updated_at = now()

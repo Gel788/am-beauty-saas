@@ -13,6 +13,12 @@ type Line = { serviceId: string; title: string; durationMin: number; priceMinor:
 type CatalogService = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[] };
 type Staff = { id: string; displayName: string };
 type ClientHit = { id: string; name: string; phones: { phone: string }[] };
+type Loyalty = {
+  program: { bonusEnabled: boolean; bonusBurnMaxBps: number };
+  bonusBalance: number;
+  memberships: { id: string; title: string; visitsLeft: number; visitsTotal: number; validTo: string; serviceIds: string[]; usableNow: boolean }[];
+};
+const LOYALTY_METHODS = ["bonus", "certificate", "membership"];
 
 export type DrawerSeed = {
   id?: string;
@@ -69,6 +75,11 @@ export function RecordDrawer({
   const [ledger, setLedger] = useState<PaymentItem[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [refundHint, setRefundHint] = useState(false);
+  const [promo, setPromo] = useState<{ code: string; discountMinor: number } | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  const [loyalty, setLoyalty] = useState<Loyalty | null>(null);
+  const [certCode, setCertCode] = useState("");
+  const [membershipId, setMembershipId] = useState("");
 
   const mark = () => setDirty(true);
   const duration = lines.reduce((sum, line) => sum + line.durationMin, 0) || 30;
@@ -96,6 +107,7 @@ export function RecordDrawer({
       comment: string;
       services: Line[];
       paidMinor: number;
+      promo: { code: string; discountMinor: number } | null;
       source: string;
       actions: { id: string; label: string; enabled: boolean; reason: string | null }[];
       history: { action: string; createdAt: string }[];
@@ -114,6 +126,11 @@ export function RecordDrawer({
       setLines(row.services.map((line) => ({ serviceId: line.serviceId, title: line.title, durationMin: line.durationMin, priceMinor: line.priceMinor })));
       setComment(row.comment);
       setPaidMinor(row.paidMinor);
+      setPromo(row.promo);
+      setLoyalty(null);
+      if (row.clientId) {
+        api<Loyalty>(`/api/clients/${row.clientId}/loyalty?appointmentId=${seed.id}`).then(setLoyalty).catch(() => setLoyalty(null));
+      }
       setActions(row.actions);
       setHistory(row.history);
       setSource(row.source);
@@ -243,8 +260,54 @@ export function RecordDrawer({
     }
   }
 
+  const loyaltyPay = LOYALTY_METHODS.includes(payMethod);
+  const usableMemberships = (loyalty?.memberships ?? []).filter((item) => item.usableNow && item.visitsLeft > 0);
+
+  function pickMethod(next: string) {
+    setPayMethod(next);
+    const due = Math.max(0, price - paidMinor);
+    if (next === "bonus" && loyalty) {
+      const cap = Math.floor((price * loyalty.program.bonusBurnMaxBps) / 10000);
+      setPayRub(String(Math.min(due, cap, loyalty.bonusBalance) / 100));
+    } else if (next === "membership") {
+      const first = usableMemberships[0];
+      setMembershipId(first?.id ?? "");
+      if (first) membershipAmount(first.id);
+    } else setPayRub(String(due / 100));
+    if (LOYALTY_METHODS.includes(next)) setTipRub("");
+  }
+
+  function membershipAmount(id: string) {
+    // A membership visit pays for exactly one eligible service of this visit.
+    const plan = loyalty?.memberships.find((item) => item.id === id);
+    const line = lines.find((item) => !plan?.serviceIds.length || plan.serviceIds.includes(item.serviceId));
+    if (line) setPayRub(String(line.priceMinor / 100));
+  }
+
+  async function promoAction(apply: boolean) {
+    if (!seed.id) return;
+    try {
+      if (apply) {
+        const result = await api<{ code: string; discountMinor: number }>(`/api/appointments/${seed.id}/promo`, { method: "POST", body: JSON.stringify({ code: promoCode }) });
+        toast(`Скидка ${formatMoney(result.discountMinor)} по промокоду ${result.code}`);
+        setPromoCode("");
+      } else {
+        await api(`/api/appointments/${seed.id}/promo`, { method: "DELETE" });
+        toast("Промокод снят, цены вернулись");
+      }
+      setReloadKey((key) => key + 1);
+      onRefresh?.();
+    } catch (error) {
+      toast((error as ApiError).message, "error");
+    }
+  }
+
   async function takePayment() {
     if (!seed.id) return;
+    const tip = loyaltyPay ? 0 : rublesToMinor(Number(tipRub || 0));
+    const tender: Record<string, unknown> = { method: payMethod, amountMinor: rublesToMinor(Number(payRub || 0)) + tip };
+    if (payMethod === "certificate") tender.certificateCode = certCode;
+    if (payMethod === "membership") tender.membershipId = membershipId;
     try {
       await api("/api/payments", {
         method: "POST",
@@ -252,8 +315,8 @@ export function RecordDrawer({
           branchId,
           appointmentId: seed.id,
           version,
-          tipMinor: rublesToMinor(Number(tipRub || 0)),
-          tenders: [{ method: payMethod, amountMinor: rublesToMinor(Number(payRub || 0)) + rublesToMinor(Number(tipRub || 0)) }],
+          tipMinor: tip,
+          tenders: [tender],
         }),
       });
       toast("Оплата проведена");
@@ -378,17 +441,55 @@ export function RecordDrawer({
               <>
                 <div className="stat-pill"><span>К оплате</span><b>{formatMoney(Math.max(0, price - paidMinor))}</b></div>
                 <div className="muted">Оплачено {formatMoney(paidMinor)} из {formatMoney(price)}</div>
-                <div className="field"><label>Сумма, ₽</label><input value={payRub} onChange={(event) => setPayRub(event.target.value)} /></div>
-                <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>
+                {promo ? (
+                  <div className="spread chip">
+                    <span>Промокод <b>{promo.code}</b>: скидка {formatMoney(promo.discountMinor)}</span>
+                    {paidMinor === 0 && <button className="btn-ghost" type="button" onClick={() => promoAction(false)}>Снять</button>}
+                  </div>
+                ) : (
+                  paidMinor === 0 && (
+                    <div className="row">
+                      <input placeholder="Промокод" value={promoCode} onChange={(event) => setPromoCode(event.target.value.toUpperCase())} style={{ flex: 1 }} />
+                      <button className="btn" type="button" disabled={!promoCode.trim()} onClick={() => promoAction(true)}>Применить</button>
+                    </div>
+                  )
+                )}
+                {loyalty && (loyalty.program.bonusEnabled || loyalty.memberships.length > 0) && (
+                  <div className="chips">
+                    {loyalty.program.bonusEnabled && <span className="chip">Баллы: {formatMoney(loyalty.bonusBalance)}</span>}
+                    {usableMemberships.map((item) => (
+                      <span key={item.id} className="chip">{item.title}: {item.visitsLeft} из {item.visitsTotal}</span>
+                    ))}
+                  </div>
+                )}
                 <div className="field">
                   <label>Способ</label>
-                  <select value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>
+                  <select value={payMethod} onChange={(event) => pickMethod(event.target.value)}>
                     <option value="card">Карта</option>
                     <option value="cash">Наличные</option>
                     <option value="sbp">СБП</option>
                     <option value="transfer">Перевод</option>
+                    {loyalty?.program.bonusEnabled && loyalty.bonusBalance > 0 && <option value="bonus">Бонусы</option>}
+                    <option value="certificate">Сертификат</option>
+                    {usableMemberships.length > 0 && <option value="membership">Абонемент</option>}
                   </select>
                 </div>
+                {payMethod === "certificate" && (
+                  <div className="field"><label>Код сертификата</label><input placeholder="XXXX-XXXX" value={certCode} onChange={(event) => setCertCode(event.target.value.toUpperCase())} /></div>
+                )}
+                {payMethod === "membership" && (
+                  <div className="field">
+                    <label>Абонемент</label>
+                    <select value={membershipId} onChange={(event) => { setMembershipId(event.target.value); membershipAmount(event.target.value); }}>
+                      {usableMemberships.map((item) => <option key={item.id} value={item.id}>{item.title} · осталось {item.visitsLeft}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="field"><label>Сумма, ₽</label><input value={payRub} readOnly={payMethod === "membership"} onChange={(event) => setPayRub(event.target.value)} /></div>
+                {payMethod === "bonus" && loyalty && (
+                  <small className="muted">Баллами можно оплатить до {formatMoney(Math.floor((price * loyalty.program.bonusBurnMaxBps) / 10000))} этого визита. Остаток доплатите вторым платежом.</small>
+                )}
+                {!loyaltyPay && <div className="field"><label>Чаевые, ₽</label><input value={tipRub} onChange={(event) => setTipRub(event.target.value)} /></div>}
                 <button className="btn-gradient" type="button" disabled={!seed.id} onClick={takePayment}>Провести</button>
               </>
             )}

@@ -135,6 +135,10 @@ export async function dayReport(ctx: Ctx, branchId: string, date: string) {
       otherMinor: byType(["loyalty"]),
       refundsMinor: lines.reduce((sum, row) => sum + Number(row.refunds), 0),
       byMethod: tenders.map((row) => ({ method: row.method, netMinor: Number(row.net) })),
+      // LOY: points, certificates and memberships are prepaid or promotional, not money that came in today.
+      paidByLoyaltyMinor: tenders
+        .filter((row) => ["bonus", "certificate", "membership"].includes(row.method))
+        .reduce((sum, row) => sum + Number(row.net), 0),
     },
     appointments: {
       total: appointments.length,

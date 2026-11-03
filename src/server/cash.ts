@@ -7,9 +7,12 @@ import { many, one } from "./db";
 import { LIVE_PAYMENT, assertMoney, insertPayment, requireShift, syncAppointmentDebt, type PaymentLineInput } from "./payments";
 import type { Ctx } from "./types";
 import { afterPaymentVoided } from "./inventory";
+import { afterPaymentVoided as loyaltyAfterVoided } from "./loyalty";
 
 const CASH_ROLES = ["owner", "admin", "accountant", "super"];
 const METHODS = ["cash", "card", "sbp", "transfer"] as const;
+const REFUND_ORDER = ["card", "sbp", "transfer", "certificate", "bonus", "membership", "cash"] as const;
+type RefundMethod = (typeof REFUND_ORDER)[number];
 type Method = (typeof METHODS)[number];
 const STALE_HOURS = 36;
 const FORMER = "Бывший сотрудник";
@@ -46,7 +49,7 @@ export type ShiftTotals = {
   openingCashMinor: number;
   byMethod: Record<Method, { inMinor: number; outMinor: number; netMinor: number }>;
   expected: Record<Method, number>;
-  revenue: { servicesMinor: number; productsMinor: number; tipsMinor: number; debtRepaidMinor: number };
+  revenue: { servicesMinor: number; productsMinor: number; tipsMinor: number; debtRepaidMinor: number; loyaltySalesMinor: number };
   incomeMinor: number;
   refundsMinor: number;
   changeGivenMinor: number;
@@ -136,6 +139,7 @@ export async function computeShiftTotals(ctx: Ctx, shiftId: string, openingCashM
       productsMinor: net(["product"]),
       tipsMinor: net(["tip"]),
       debtRepaidMinor: net(["debt"]),
+      loyaltySalesMinor: net(["loyalty"]),
     },
     incomeMinor: Number(counts?.income ?? 0),
     refundsMinor: Number(counts?.refunds ?? 0),
@@ -497,7 +501,7 @@ export async function refundPayment(
   input: {
     amountMinor?: number;
     lines?: { lineId: string; amountMinor: number }[];
-    method?: Method;
+    method?: RefundMethod;
     reason?: string;
   } = {},
 ) {
@@ -556,12 +560,20 @@ export async function refundPayment(
   if (total <= 0) throw new AppError("VALIDATION", "Укажите сумму возврата");
 
   // Money goes back the way it came: each method up to what it brought in, minus earlier refunds.
-  const tenderRows = await many<{ method: Method; s: number }>(
+  const tenderRows = await many<{ method: RefundMethod; s: number; certificate_id: string | null; membership_id: string | null }>(
     ctx.db,
-    "SELECT method, COALESCE(SUM(amount_minor), 0)::int AS s FROM payment_tenders WHERE payment_id = $1 GROUP BY method",
+    `SELECT method, COALESCE(SUM(amount_minor), 0)::int AS s, (array_agg(certificate_id))[1] AS certificate_id, (array_agg(membership_id))[1] AS membership_id
+     FROM payment_tenders WHERE payment_id = $1 GROUP BY method`,
     [paymentId],
   );
-  const refundedTenders = await many<{ method: Method; s: number }>(
+  // Bonuses, certificates and memberships go back onto the same account they were spent from.
+  const instrument = new Map(
+    tenderRows.map((row) => [
+      row.method,
+      { ...(row.certificate_id ? { certificateId: row.certificate_id } : {}), ...(row.membership_id ? { membershipId: row.membership_id } : {}) },
+    ]),
+  );
+  const refundedTenders = await many<{ method: RefundMethod; s: number }>(
     ctx.db,
     `SELECT t.method, COALESCE(SUM(t.amount_minor), 0)::int AS s
      FROM payment_tenders t JOIN payments p ON p.id = t.payment_id
@@ -571,21 +583,21 @@ export async function refundPayment(
   );
   const methodLeft = new Map(tenderRows.map((row) => [row.method, Number(row.s)]));
   for (const row of refundedTenders) methodLeft.set(row.method, (methodLeft.get(row.method) ?? 0) - Number(row.s));
-  const tenders: { method: Method; amountMinor: number }[] = [];
+  const tenders: { method: RefundMethod; amountMinor: number; certificateId?: string | null; membershipId?: string | null }[] = [];
   if (input.method) {
-    if (!METHODS.includes(input.method)) throw new AppError("VALIDATION", "Неизвестный способ возврата");
+    if (!REFUND_ORDER.includes(input.method)) throw new AppError("VALIDATION", "Неизвестный способ возврата");
     const available = methodLeft.get(input.method) ?? 0;
     if (total > available) {
       throw new AppError("VALIDATION", "Способом возврата можно вернуть не больше, чем им оплатили", { availableMinor: available });
     }
-    tenders.push({ method: input.method, amountMinor: total });
+    tenders.push({ method: input.method, amountMinor: total, ...instrument.get(input.method) });
   } else {
-    // Non-cash first, so the drawer is touched only when the original was paid in cash.
+    // Non-cash money first, then loyalty, cash last, so the drawer is touched only when it must be.
     let left = total;
-    for (const method of ["card", "sbp", "transfer", "cash"] as const) {
+    for (const method of REFUND_ORDER) {
       const take = Math.min(left, Math.max(0, methodLeft.get(method) ?? 0));
       if (take <= 0) continue;
-      tenders.push({ method, amountMinor: take });
+      tenders.push({ method, amountMinor: take, ...instrument.get(method) });
       left -= take;
     }
     if (left > 0) throw new AppError("VALIDATION", "Не хватает суммы по способам оплаты для возврата");
@@ -694,6 +706,7 @@ export async function voidPayment(ctx: Ctx, paymentId: string, input: { reason?:
     ]);
   }
   await afterPaymentVoided(ctx, paymentId);
+  await loyaltyAfterVoided(ctx, paymentId);
   const synced = await afterMoneyChange(ctx, original.appointment_id);
   await audit(ctx, {
     branchId: original.branch_id,

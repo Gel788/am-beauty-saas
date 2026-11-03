@@ -458,3 +458,4 @@ h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spac
 }
 .payroll-lines { table-layout: fixed; }
 @media (max-width: 720px) { .payroll-lines { table-layout: auto; } }
+.chip.on { border-color: var(--accent, #8a4fff); background: #f3ecff; color: var(--ink); }

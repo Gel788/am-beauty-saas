@@ -35,6 +35,7 @@ export const METHOD_LABEL: Record<string, string> = {
   transfer: "Перевод",
   bonus: "Бонусы",
   certificate: "Сертификат",
+  membership: "Абонемент",
 };
 
 const LINE_LABEL: Record<string, string> = {

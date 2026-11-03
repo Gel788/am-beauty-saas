@@ -4,10 +4,26 @@ import { isAdminPlus, loadBranch } from "./access";
 import { one } from "./db";
 import type { Ctx } from "./types";
 import { afterPaymentPosted, productLines } from "./inventory";
+import {
+  afterPaymentPosted as loyaltyAfterPosted,
+  certificateSaleLines,
+  fulfilSale,
+  isLoyaltyMethod,
+  membershipSaleLines,
+  resolveTenders,
+  type ResolvedTender,
+  type SaleLine,
+} from "./loyalty";
 
-type TenderInput = { method: "cash" | "card" | "sbp" | "transfer" | "bonus" | "certificate"; amountMinor: number };
+type TenderInput = {
+  method: "cash" | "card" | "sbp" | "transfer" | "bonus" | "certificate" | "membership";
+  amountMinor: number;
+  certificateCode?: string;
+  membershipId?: string;
+};
+type StoredTender = ResolvedTender;
 
-const ALLOWED = new Set(["cash", "card", "sbp", "transfer"]);
+const ALLOWED = new Set(["cash", "card", "sbp", "transfer", "bonus", "certificate", "membership"]);
 
 /** Payments that still carry money: posted, or refunded originals (their refunds are separate `out` rows). */
 export const LIVE_PAYMENT = "p.status IN ('posted', 'refunded')";
@@ -143,11 +159,25 @@ export async function openShift(
   return { id, status: "open" as const, openingCashMinor: input.openingCashMinor };
 }
 
+export type PaymentResult = {
+  id: string;
+  totalMinor: number;
+  changeMinor: number;
+  status: "posted";
+  lineIds: string[];
+  partial: boolean;
+  debtMinor?: number;
+  overpaidMinor?: number;
+  paidMinor?: number;
+  priceMinor?: number;
+  issued?: { kind: string; id: string; code?: string }[];
+};
+
 export async function createPayment(
   ctx: Ctx,
   input: {
     branchId: string;
-    kind?: "visit" | "deposit" | "tip" | "debt" | "misc";
+    kind?: "visit" | "deposit" | "tip" | "debt" | "misc" | "certificate" | "membership";
     appointmentId?: string | null;
     clientId?: string | null;
     version?: number;
@@ -159,19 +189,23 @@ export async function createPayment(
     acknowledgePartial?: boolean;
     /** INV-SALE-01: goods sold through the till (kind misc). */
     items?: { itemId: string; qty: unknown; priceMinor?: number }[];
+    /** LOY-SUB-01: membership plan sold (kind membership). */
+    planId?: string;
   },
-) {
+): Promise<PaymentResult> {
   const kind = input.kind ?? (input.appointmentId ? "visit" : "misc");
-  if (kind === "misc" || kind === "debt") {
+  if (kind === "misc" || kind === "debt" || kind === "certificate" || kind === "membership") {
     if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") {
       throw new AppError("FORBIDDEN", "Недостаточно прав");
     }
   }
   for (const tender of input.tenders ?? []) {
     assertMoney(tender.amountMinor, "Оплата");
-    if (!ALLOWED.has(tender.method)) {
-      throw new AppError("VALIDATION", "Бонусы и сертификаты подключаются с модулем лояльности");
-    }
+    if (!ALLOWED.has(tender.method)) throw new AppError("VALIDATION", "Неизвестный способ оплаты");
+  }
+  const loyal = (input.tenders ?? []).some((tender) => isLoyaltyMethod(tender.method));
+  if (loyal && !(kind === "visit" || (kind === "misc" && input.items?.length))) {
+    throw new AppError("VALIDATION", "Бонусами, сертификатом и абонементом оплачивают визит или товар");
   }
   const handed = (input.tenders ?? []).reduce((sum, tender) => sum + tender.amountMinor, 0);
   if (handed <= 0) throw new AppError("VALIDATION", "Укажите сумму оплаты");
@@ -183,6 +217,28 @@ export async function createPayment(
   let clientId = input.clientId ?? null;
   const appointmentId = input.appointmentId ?? null;
   const lines: PaymentLineInput[] = [];
+
+  if (kind === "certificate" || kind === "membership") {
+    const sale: SaleLine[] =
+      kind === "certificate" ? await certificateSaleLines(ctx, Number(input.amountMinor ?? handed)) : await membershipSaleLines(ctx, String(input.planId ?? ""), clientId);
+    const bill = sale.reduce((sum, line) => sum + line.amountMinor, 0);
+    if (handed < bill) throw new AppError("VALIDATION", "Внесено меньше суммы чека");
+    const change = handed - bill;
+    const cashHanded = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
+    if (change > cashHanded) throw new AppError("VALIDATION", "Сдача возможна только с наличных. Уменьшите сумму карты");
+    const payment = await insertPayment(ctx, {
+      branchId: input.branchId,
+      appointmentId: null,
+      clientId,
+      shiftId,
+      total: bill,
+      change,
+      lines: sale,
+      tenders: storedTenders(input.tenders, change),
+    });
+    const issued = await fulfilSale(ctx, payment.id, input.branchId, clientId, payment.lineIds.map((lineId, index) => ({ lineId, line: sale[index] })));
+    return { ...payment, partial: false, issued };
+  }
 
   if (kind === "debt") {
     if (!clientId) throw new AppError("VALIDATION", "Укажите клиента");
@@ -205,6 +261,7 @@ export async function createPayment(
     const change = handed - bill;
     const cashHanded = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
     if (change > cashHanded) throw new AppError("VALIDATION", "Сдача возможна только с наличных. Уменьшите сумму карты");
+    const resolved = await resolveTenders(ctx, { tenders: input.tenders, branchId: input.branchId, clientId, bill: goods, appointmentId: null });
     const sale = await insertPayment(ctx, {
       branchId: input.branchId,
       appointmentId: null,
@@ -213,7 +270,7 @@ export async function createPayment(
       total: bill,
       change,
       lines,
-      tenders: storedTenders(input.tenders, change),
+      tenders: storedTenders(resolved, change),
     });
     return { ...sale, partial: false };
   } else if (kind === "misc") {
@@ -249,8 +306,8 @@ export async function createPayment(
       throw new AppError("FORBIDDEN", "Недостаточно прав");
     }
     clientId = appt.client_id;
-    const services = await ctx.db.query<{ id: string; title_snapshot: string; price_minor: number }>(
-      "SELECT id, title_snapshot, price_minor FROM appointment_services WHERE appointment_id = $1 ORDER BY position",
+    const services = await ctx.db.query<{ id: string; service_id: string | null; title_snapshot: string; price_minor: number }>(
+      "SELECT id, service_id, title_snapshot, price_minor FROM appointment_services WHERE appointment_id = $1 ORDER BY position",
       [appointmentId],
     );
     const price = services.rows.reduce((sum, service) => sum + Number(service.price_minor), 0);
@@ -312,6 +369,33 @@ export async function createPayment(
       if (left > 0) throw new AppError("VALIDATION", "Сумма больше остатка по записи");
       if (tipMinor > 0) lines.push({ type: "tip", refId: appointmentId, title: "Чаевые", amountMinor: tipMinor });
       const total = lines.reduce((sum, line) => sum + line.amountMinor, 0);
+      const serviceDueList = [];
+      for (const service of services.rows) {
+        const paidService = await one<{ s: number }>(
+          ctx.db,
+          `SELECT ${NET_AMOUNT} AS s FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
+           WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT} AND pl.ref_id = $2 AND pl.line_type = 'service'`,
+          [appointmentId, service.id],
+        );
+        serviceDueList.push({ serviceId: service.service_id, dueMinor: Number(service.price_minor) - Number(paidService?.s ?? 0) });
+      }
+      // LOY-BON-02: the burn cap is a share of the whole visit, so paying in two goes cannot beat it.
+      const spent = await one<{ s: number }>(
+        ctx.db,
+        `SELECT COALESCE(SUM(CASE WHEN p.direction = 'in' THEN t.amount_minor ELSE -t.amount_minor END), 0)::int AS s
+         FROM payment_tenders t JOIN payments p ON p.id = t.payment_id
+         WHERE p.appointment_id = $1 AND ${LIVE_PAYMENT} AND t.method = 'bonus'`,
+        [appointmentId],
+      );
+      const resolved = await resolveTenders(ctx, {
+        tenders: input.tenders,
+        branchId: input.branchId,
+        clientId,
+        bill: servicePay,
+        bonusBase: { totalMinor: services.rows.reduce((sum, service) => sum + Number(service.price_minor), 0), spentMinor: Number(spent?.s ?? 0) },
+        appointmentId,
+        serviceDue: serviceDueList,
+      });
       const payment = await insertPayment(ctx, {
         branchId: input.branchId,
         appointmentId,
@@ -320,7 +404,7 @@ export async function createPayment(
         total,
         change,
         lines,
-        tenders: storedTenders(input.tenders, change),
+        tenders: storedTenders(resolved, change),
       });
       const synced = await syncAppointmentDebt(ctx, appointmentId);
       await ctx.db.query(
@@ -359,9 +443,9 @@ export async function createPayment(
   return { ...payment, ...(synced ?? {}), partial: synced ? synced.paidMinor < synced.priceMinor && synced.paidMinor > 0 : false };
 }
 
-function storedTenders(tenders: TenderInput[], change: number) {
+function storedTenders(tenders: StoredTender[], change: number) {
   let changeLeft = change;
-  const stored: { method: TenderInput["method"]; amountMinor: number }[] = [];
+  const stored: StoredTender[] = [];
   for (const tender of tenders) {
     let amount = tender.amountMinor;
     if (tender.method === "cash" && changeLeft > 0) {
@@ -369,7 +453,7 @@ function storedTenders(tenders: TenderInput[], change: number) {
       amount -= cut;
       changeLeft -= cut;
     }
-    if (amount > 0) stored.push({ method: tender.method, amountMinor: amount });
+    if (amount > 0) stored.push({ ...tender, amountMinor: amount });
   }
   return stored;
 }
@@ -394,7 +478,7 @@ export async function insertPayment(
     total: number;
     change: number;
     lines: PaymentLineInput[];
-    tenders: { method: string; amountMinor: number }[];
+    tenders: StoredTender[];
     direction?: "in" | "out";
     refundOfId?: string | null;
     refundReason?: string | null;
@@ -426,12 +510,15 @@ export async function insertPayment(
       input.refundReason ?? null,
     ],
   );
+  const lineIds: string[] = [];
   for (const line of input.lines) {
+    const lineId = crypto.randomUUID();
+    lineIds.push(lineId);
     await ctx.db.query(
       `INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, ref_id, title, amount_minor, refund_of_line_id, item_id, qty)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
-        crypto.randomUUID(),
+        lineId,
         ctx.actor.tenantId,
         id,
         line.type,
@@ -446,12 +533,13 @@ export async function insertPayment(
   }
   for (const tender of input.tenders) {
     await ctx.db.query(
-      `INSERT INTO payment_tenders (id, tenant_id, payment_id, method, amount_minor)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [crypto.randomUUID(), ctx.actor.tenantId, id, tender.method, tender.amountMinor],
+      `INSERT INTO payment_tenders (id, tenant_id, payment_id, method, amount_minor, certificate_id, membership_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [crypto.randomUUID(), ctx.actor.tenantId, id, tender.method, tender.amountMinor, tender.certificateId ?? null, tender.membershipId ?? null],
     );
   }
   await afterPaymentPosted(ctx, id);
+  await loyaltyAfterPosted(ctx, id);
   if (direction === "in") {
     await audit(ctx, {
       branchId: input.branchId,
@@ -461,5 +549,5 @@ export async function insertPayment(
       diff: { totalMinor: input.total, changeMinor: input.change, appointmentId: input.appointmentId, shiftId: input.shiftId },
     });
   }
-  return { id, totalMinor: input.total, changeMinor: input.change, status: "posted" as const };
+  return { id, totalMinor: input.total, changeMinor: input.change, status: "posted" as const, lineIds };
 }

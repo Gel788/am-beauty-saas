@@ -27,6 +27,7 @@ type Booking = {
   staffName: string;
   serviceTitle: string;
   priceMinor: number;
+  promo: { code: string; discountMinor: number } | null;
   cancelToken: string;
   cancelUntil: string;
 };
@@ -83,7 +84,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
   const [hold, setHold] = useState<Hold | null>(null);
   const [busy, setBusy] = useState(false);
   const [booking, setBooking] = useState<Booking | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", comment: "", website: "" });
+  const [form, setForm] = useState({ name: "", phone: "", comment: "", promo: "", website: "" });
   const idempotencyKey = useRef<string>("");
 
   useEffect(() => {
@@ -172,7 +173,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
     try {
       const result = await call<Booking>(`${base}/bookings`, {
         method: "POST",
-        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, idempotencyKey: idempotencyKey.current }),
+        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, idempotencyKey: idempotencyKey.current }),
       });
       setBooking(result);
       setHold(null);
@@ -317,6 +318,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
               <label>Имя<input required autoComplete="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
               <label>Телефон<input required type="tel" autoComplete="tel" placeholder="+7 900 000-00-00" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               <label>Комментарий<textarea rows={2} value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} /></label>
+              <label>Промокод<input autoComplete="off" value={form.promo} onChange={(event) => setForm({ ...form, promo: event.target.value.toUpperCase() })} /></label>
               <input className="bk-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
               <button className="bk-primary" type="submit" disabled={busy}>{busy ? "Записываем…" : "Записаться"}</button>
               <button className="bk-link" type="button" onClick={() => backToSlots()}>Назад к выбору времени</button>
@@ -330,11 +332,12 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
             <h2>Вы записаны</h2>
             <p className="bk-when">{formatWhen(booking.startsAt, tz)}</p>
             <p>{booking.serviceTitle} · {booking.staffName} · {formatMoney(booking.priceMinor, branch.currency)}</p>
+            {booking.promo && <p className="bk-muted">Промокод {booking.promo.code}: скидка {formatMoney(booking.promo.discountMinor, branch.currency)}</p>}
             <p className="bk-muted">
               Отменить запись можно до {formatWhen(booking.cancelUntil, tz)} по ссылке:{" "}
               <a href={`/booking/${booking.cancelToken}`} target="_top">управление записью</a>. Сохраните её.
             </p>
-            <button className="bk-link" onClick={() => { setBooking(null); setService(null); setForm({ name: "", phone: "", comment: "", website: "" }); setStep(1); }}>
+            <button className="bk-link" onClick={() => { setBooking(null); setService(null); setForm({ name: "", phone: "", comment: "", promo: "", website: "" }); setStep(1); }}>
               Записаться ещё
             </button>
           </section>

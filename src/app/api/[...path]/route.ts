@@ -69,6 +69,26 @@ import {
   updateRule,
 } from "@/server/payroll";
 import {
+  adjustBonus,
+  clientLoyalty,
+  createPlan,
+  createPromo,
+  extendMembership,
+  findCertificate,
+  freezeMembership,
+  getLoyaltySettings,
+  listCertificates,
+  listMemberships,
+  listPlans,
+  listPromos,
+  removePromo,
+  applyPromo,
+  setPlanActive,
+  setPromoActive,
+  updateLoyaltySettings,
+  voidCertificate,
+} from "@/server/loyalty";
+import {
   applyCount,
   cancelCount,
   createItem,
@@ -212,6 +232,61 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "GET reports/day") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dayReport(ctx, branchId, url.searchParams.get("date") ?? "")));
+  }
+  if (parts[0] === "loyalty") {
+    const [, kind, id, action] = parts;
+    if (kind === "settings" && method === "GET") return NextResponse.json(await run((ctx) => getLoyaltySettings(ctx)));
+    if (kind === "settings" && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => updateLoyaltySettings(ctx, body as never)));
+    }
+    if (kind === "certificates" && !id && method === "GET") {
+      const code = url.searchParams.get("code");
+      if (code) return NextResponse.json(await run((ctx) => findCertificate(ctx, code)));
+      return NextResponse.json(await run((ctx) => listCertificates(ctx, { q: url.searchParams.get("q") ?? undefined })));
+    }
+    if (kind === "certificates" && id && action === "void" && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => voidCertificate(ctx, id, { reason: body.reason as string | undefined })));
+    }
+    if (kind === "plans" && !id && method === "GET") return NextResponse.json(await run((ctx) => listPlans(ctx)));
+    if (kind === "plans" && !id && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => createPlan(ctx, body as never)));
+    }
+    if (kind === "plans" && id && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => setPlanActive(ctx, id, Boolean(body.active))));
+    }
+    if (kind === "memberships" && !id && method === "GET") return NextResponse.json(await run((ctx) => listMemberships(ctx)));
+    if (kind === "memberships" && id && method === "POST") {
+      const body = await readJson(request);
+      if (action === "freeze") return NextResponse.json(await run((ctx) => freezeMembership(ctx, id, body as never)));
+      if (action === "extend") return NextResponse.json(await run((ctx) => extendMembership(ctx, id, { days: Number(body.days), reason: body.reason as string | undefined })));
+    }
+    if (kind === "promos" && !id && method === "GET") return NextResponse.json(await run((ctx) => listPromos(ctx)));
+    if (kind === "promos" && !id && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => createPromo(ctx, body as never)));
+    }
+    if (kind === "promos" && id && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => setPromoActive(ctx, id, Boolean(body.active))));
+    }
+  }
+  if (parts[0] === "clients" && parts[1] && parts[2] === "loyalty" && method === "GET") {
+    return NextResponse.json(await run((ctx) => clientLoyalty(ctx, parts[1], { appointmentId: url.searchParams.get("appointmentId") || undefined })));
+  }
+  if (parts[0] === "clients" && parts[1] && parts[2] === "bonus" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => adjustBonus(ctx, parts[1], { delta: Number(body.delta), reason: body.reason as string | undefined })));
+  }
+  if (parts[0] === "appointments" && parts[1] && parts[2] === "promo") {
+    if (method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => applyPromo(ctx, parts[1], String(body.code ?? ""))));
+    }
+    if (method === "DELETE") return NextResponse.json(await run((ctx) => removePromo(ctx, parts[1])));
   }
   if (parts[0] === "inventory") {
     const [, kind, id, action] = parts;
@@ -588,6 +663,7 @@ async function handlePublic(request: NextRequest, parts: string[]) {
             phone: String(body.phone ?? ""),
             comment: body.comment ? String(body.comment) : undefined,
             idempotencyKey: body.idempotencyKey ? String(body.idempotencyKey) : undefined,
+            promoCode: body.promoCode ? String(body.promoCode) : undefined,
           }),
         ),
       );
