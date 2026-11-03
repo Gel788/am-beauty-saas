@@ -49,7 +49,19 @@ import {
   voidPayment,
 } from "@/server/cash";
 import { dashboard } from "@/server/dashboard";
-import { listBranches, updateBranch } from "@/server/settings";
+import {
+  asOnline,
+  cancelBooking,
+  confirmBooking,
+  createHold,
+  getBooking,
+  listSlots,
+  publicCatalog,
+  releaseHold,
+  resolveBookingToken,
+  resolvePublicBranch,
+} from "@/server/booking";
+import { listBranches, updateBranch, updateTenantSlug } from "@/server/settings";
 import type { Actor } from "@/server/types";
 import type { AppointmentStatus } from "@/domain/status";
 
@@ -114,6 +126,8 @@ async function handle(request: NextRequest, parts: string[]) {
     return response;
   }
 
+  if (parts[0] === "public") return handlePublic(request, parts.slice(1));
+
   const actor = await actorFromToken(request.cookies.get("ab_session")?.value);
   if (!actor) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Нужно войти" } }, { status: 401 });
@@ -134,6 +148,10 @@ async function handle(request: NextRequest, parts: string[]) {
   const run = <T>(fn: (ctx: Parameters<Parameters<typeof asActor<T>>[1]>[0]) => Promise<T>) => asActor(actor, fn);
 
   if (key === "GET branches") return NextResponse.json(await run((ctx) => listBranches(ctx)));
+  if (key === "PATCH tenant") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateTenantSlug(ctx, String(body.slug ?? ""))));
+  }
   if (method === "PATCH" && parts[0] === "branches" && parts[1]) {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => updateBranch(ctx, parts[1], body)));
@@ -355,6 +373,74 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json(await run((ctx) => createPayment(ctx, body as never)));
   }
 
+  return NextResponse.json({ error: { code: "NOT_FOUND", message: "Не найдено" } }, { status: 404 });
+}
+
+function clientIp(request: NextRequest) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || null;
+}
+
+/** Online booking (OB-*): no session; the slug or the cancel token picks the tenant. */
+async function handlePublic(request: NextRequest, parts: string[]) {
+  const method = request.method;
+  const url = request.nextUrl;
+  if (parts[0] === "booking" && parts[1]) {
+    const { tenantId, appointmentId } = await resolveBookingToken(parts[1]);
+    if (method === "GET" && !parts[2]) return NextResponse.json(await asOnline(tenantId, (ctx) => getBooking(ctx, appointmentId)));
+    if (method === "POST" && parts[2] === "cancel") {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await asOnline(tenantId, (ctx) => cancelBooking(ctx, appointmentId, { reason: body.reason ? String(body.reason) : undefined })),
+      );
+    }
+  }
+  if (parts[0] === "b" && parts[1] && parts[2]) {
+    const { tenantId, branchId } = await resolvePublicBranch(parts[1], parts[2]);
+    const action = parts.slice(3).join("/");
+    if (method === "GET" && action === "catalog") return NextResponse.json(await asOnline(tenantId, (ctx) => publicCatalog(ctx, branchId)));
+    if (method === "GET" && action === "slots") {
+      return NextResponse.json(
+        await asOnline(tenantId, (ctx) =>
+          listSlots(ctx, branchId, {
+            serviceId: url.searchParams.get("serviceId") ?? "",
+            staffId: url.searchParams.get("staffId") || null,
+            from: url.searchParams.get("from") ?? undefined,
+            days: url.searchParams.get("days") ? Number(url.searchParams.get("days")) : undefined,
+          }),
+        ),
+      );
+    }
+    if (method === "POST" && action === "holds") {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await asOnline(tenantId, (ctx) =>
+          createHold(ctx, branchId, {
+            serviceId: String(body.serviceId ?? ""),
+            staffId: body.staffId ? String(body.staffId) : null,
+            startsAt: String(body.startsAt ?? ""),
+            ip: clientIp(request),
+          }),
+        ),
+      );
+    }
+    if (method === "DELETE" && parts[3] === "holds" && parts[4]) {
+      return NextResponse.json(await asOnline(tenantId, (ctx) => releaseHold(ctx, branchId, parts[4])));
+    }
+    if (method === "POST" && action === "bookings") {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await asOnline(tenantId, (ctx) =>
+          confirmBooking(ctx, branchId, {
+            holdId: String(body.holdId ?? ""),
+            name: String(body.name ?? ""),
+            phone: String(body.phone ?? ""),
+            comment: body.comment ? String(body.comment) : undefined,
+            idempotencyKey: body.idempotencyKey ? String(body.idempotencyKey) : undefined,
+          }),
+        ),
+      );
+    }
+  }
   return NextResponse.json({ error: { code: "NOT_FOUND", message: "Не найдено" } }, { status: 404 });
 }
 

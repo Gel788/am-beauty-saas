@@ -447,7 +447,7 @@ export function JournalBoard() {
                             {serviceTitle && <small>{serviceTitle}</small>}
                           </>
                         )}
-                        {appt.source === "online" && <span className="ai-badge">AI</span>}
+                        {appt.source === "online" && <span className="ai-badge" title="Онлайн-запись">Онлайн</span>}
                         <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
                       </button>
                     );

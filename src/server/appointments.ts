@@ -51,7 +51,7 @@ type Line = {
   position: number;
 };
 
-async function lockStaff(ctx: Ctx, staffId: string) {
+export async function lockStaff(ctx: Ctx, staffId: string) {
   const row = await one<{ id: string; active: boolean; display_name: string }>(
     ctx.db,
     "SELECT id, active, display_name FROM staff WHERE id = $1 FOR UPDATE",
@@ -152,7 +152,7 @@ async function resolveLines(
 
 type Overlap = { id: string; branchId: string; clientName: string | null; startsAt: string; endsAt: string };
 
-async function findOverlaps(ctx: Ctx, staffId: string, starts: Date, ends: Date, excludeId?: string): Promise<Overlap[]> {
+export async function findOverlaps(ctx: Ctx, staffId: string, starts: Date, ends: Date, excludeId?: string): Promise<Overlap[]> {
   const rows = await many<{
     id: string;
     branch_id: string;
@@ -314,7 +314,10 @@ export async function createAppointment(
   },
 ) {
   const branch = await loadBranch(ctx, input.branchId);
-  if (ctx.actor.role === "master") {
+  const online = ctx.channel === "online";
+  if (online) {
+    if (input.source !== "online") throw new AppError("FORBIDDEN", "Недостаточно прав");
+  } else if (ctx.actor.role === "master") {
     if (!branch.master_can_create_own || ctx.actor.staffId !== input.staffId) {
       throw new AppError("FORBIDDEN", "Мастер может создавать только свои записи");
     }
@@ -349,7 +352,7 @@ export async function createAppointment(
   const forced = assertSlot(overlaps, input.branchId, input.forceOverlap, input.overlapReason, isAdminPlus(ctx.actor));
   await assertHours(ctx, branch, input.staffId, starts, ends, input.acknowledgeSoft);
   const source = input.source ?? (ctx.actor.role === "master" ? "master" : "admin");
-  if (source === "online" && !isAdminPlus(ctx.actor)) {
+  if (source === "online" && !online && !isAdminPlus(ctx.actor)) {
     throw new AppError("FORBIDDEN", "Недостаточно прав");
   }
   const id = crypto.randomUUID();

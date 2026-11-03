@@ -19,6 +19,16 @@ type Branch = {
   gridLabelMin: number;
   requirePaymentOnComplete: boolean;
   shiftVarianceThresholdMinor: number;
+  tenantSlug: string | null;
+  slug: string;
+  onlineEnabled: boolean;
+  onlineStepMin: number;
+  onlineMinNoticeMin: number;
+  onlineMaxAdvanceDays: number;
+  onlineHoldMin: number;
+  onlineCancelHours: number;
+  onlineMaxActivePerPhone: number;
+  onlineAccent: string;
 };
 
 export function SettingsView() {
@@ -59,6 +69,79 @@ export function SettingsView() {
         <div className="field"><label>Неявка после, минут</label><input type="number" value={branch.noShowGraceMin} onChange={(event) => set("noShowGraceMin", Number(event.target.value))} /></div>
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
+      <OnlineBookingSettings branch={branch} onSaved={setBranch} />
     </>
+  );
+}
+
+function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
+  const toast = useToast();
+  const [draft, setDraft] = useState(branch);
+  const [tenantSlug, setTenantSlug] = useState(branch.tenantSlug ?? "");
+  useEffect(() => {
+    setDraft(branch);
+    setTenantSlug(branch.tenantSlug ?? "");
+  }, [branch]);
+  const set = <K extends keyof Branch>(key: K, value: Branch[K]) => setDraft({ ...draft, [key]: value });
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const link = `${origin}/b/${branch.tenantSlug ?? ""}/${branch.slug}`;
+  return (
+    <form
+      className="panel list"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        try {
+          if (tenantSlug !== branch.tenantSlug) {
+            await api<{ tenantSlug: string }>("/api/tenant", { method: "PATCH", body: JSON.stringify({ slug: tenantSlug }) });
+          }
+          const saved = await api<Branch>(`/api/branches/${branch.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              slug: draft.slug,
+              onlineEnabled: draft.onlineEnabled,
+              onlineStepMin: draft.onlineStepMin,
+              onlineMinNoticeMin: draft.onlineMinNoticeMin,
+              onlineMaxAdvanceDays: draft.onlineMaxAdvanceDays,
+              onlineHoldMin: draft.onlineHoldMin,
+              onlineCancelHours: draft.onlineCancelHours,
+              onlineMaxActivePerPhone: draft.onlineMaxActivePerPhone,
+              onlineAccent: draft.onlineAccent,
+            }),
+          });
+          onSaved(saved);
+          toast("Онлайн-запись сохранена");
+        } catch (error) {
+          toast((error as ApiError).message, "error");
+        }
+      }}
+    >
+      <h2 style={{ margin: 0 }}>Онлайн-запись</h2>
+      <label className="row"><input type="checkbox" checked={draft.onlineEnabled} onChange={(event) => set("onlineEnabled", event.target.checked)} /> Принимать онлайн-записи</label>
+      <div className="field">
+        <label>Ссылка для клиентов</label>
+        <div className="row" style={{ gap: 8 }}>
+          <input readOnly value={link} onFocus={(event) => event.target.select()} />
+          <button type="button" className="btn-ghost" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Ссылка скопирована"))}>Копировать</button>
+        </div>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Для сайта: {`<iframe src="${link}" width="100%" height="720" style="border:0"></iframe>`}
+        </span>
+      </div>
+      <div className="field"><label>Адрес салона в ссылке</label><input value={tenantSlug} onChange={(event) => setTenantSlug(event.target.value)} /></div>
+      <div className="field"><label>Адрес филиала в ссылке</label><input value={draft.slug} onChange={(event) => set("slug", event.target.value)} /></div>
+      <div className="field">
+        <label>Шаг слотов</label>
+        <select value={draft.onlineStepMin} onChange={(event) => set("onlineStepMin", Number(event.target.value))}>
+          {[5, 10, 15, 30].map((value) => <option key={value} value={value}>{value} минут</option>)}
+        </select>
+      </div>
+      <div className="field"><label>Не раньше чем через, минут</label><input type="number" min={0} value={draft.onlineMinNoticeMin} onChange={(event) => set("onlineMinNoticeMin", Number(event.target.value))} /></div>
+      <div className="field"><label>Запись вперёд, дней</label><input type="number" min={1} max={365} value={draft.onlineMaxAdvanceDays} onChange={(event) => set("onlineMaxAdvanceDays", Number(event.target.value))} /></div>
+      <div className="field"><label>Бронь слота пока клиент заполняет контакты, минут</label><input type="number" min={5} max={10} value={draft.onlineHoldMin} onChange={(event) => set("onlineHoldMin", Number(event.target.value))} /></div>
+      <div className="field"><label>Клиент может отменить не позже чем за, часов</label><input type="number" min={0} value={draft.onlineCancelHours} onChange={(event) => set("onlineCancelHours", Number(event.target.value))} /></div>
+      <div className="field"><label>Будущих онлайн-записей на один телефон</label><input type="number" min={1} value={draft.onlineMaxActivePerPhone} onChange={(event) => set("onlineMaxActivePerPhone", Number(event.target.value))} /></div>
+      <div className="field"><label>Цвет страницы записи</label><input type="color" value={draft.onlineAccent} onChange={(event) => set("onlineAccent", event.target.value)} /></div>
+      <button className="btn-gradient" type="submit">Сохранить онлайн-запись</button>
+    </form>
   );
 }

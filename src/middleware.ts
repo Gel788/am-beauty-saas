@@ -7,6 +7,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/register") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/staff/") ||
+    pathname.startsWith("/b/") ||
+    pathname.startsWith("/booking/") ||
     /\.(?:png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(pathname)
   ) {
     return NextResponse.next();
