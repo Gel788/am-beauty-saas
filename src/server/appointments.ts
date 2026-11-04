@@ -406,7 +406,12 @@ export async function getAppointment(ctx: Ctx, id: string) {
   }
   const lines = await linesOf(ctx, id);
   const client = row.client_id
-    ? await one<{ name: string }>(ctx.db, "SELECT name FROM clients WHERE id = $1", [row.client_id])
+    ? await one<{ name: string; no_shows: number }>(
+        ctx.db,
+        `SELECT name, (SELECT count(*)::int FROM appointments x WHERE x.client_id = c.id AND x.status = 'no_show' AND x.starts_at > $2::timestamptz - interval '365 days') AS no_shows
+         FROM clients c WHERE id = $1`,
+        [row.client_id, ctx.now.toISOString()],
+      )
     : null;
   const paid = await paidMinor(ctx, id);
   const price = lines.reduce((sum, line) => sum + line.priceMinor, 0);
@@ -422,6 +427,8 @@ export async function getAppointment(ctx: Ctx, id: string) {
     staffId: row.staff_id,
     clientId: row.client_id,
     clientName: client?.name ?? null,
+    /** NOSHOW-01: the desk sees an unreliable client before taking the booking. */
+    clientNoShows: Number(client?.no_shows ?? 0),
     bookedByClientId: row.booked_by_client_id,
     guest: Boolean(row.booked_by_client_id),
     startsAt: new Date(row.starts_at).toISOString(),

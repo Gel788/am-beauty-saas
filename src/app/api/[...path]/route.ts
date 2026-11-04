@@ -1,4 +1,24 @@
 import { pool } from "@/server/db";
+import {
+  closeWaitlistEntry,
+  createWaitlistEntry,
+  listReviews,
+  listWaitlist,
+  matchWaitlistOnCancel,
+  moderateReview,
+  offerWaitlistSlot,
+  publicReviewInfo,
+  publicReviews,
+  rebookAppointment,
+  rebookDue,
+  resolveReviewToken,
+  retentionSettings,
+  reviewsCsv,
+  runRetentionJob,
+  sendRebookReminder,
+  submitReview,
+  updateRetentionSettings,
+} from "@/server/retention";
 import { NextRequest, NextResponse } from "next/server";
 import { isAppError } from "@/domain/errors";
 import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
@@ -260,6 +280,14 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json(await runReminderJob());
   }
 
+  if (key === "POST jobs/retention") {
+    const expected = process.env.JOBS_TOKEN;
+    if (!expected || request.headers.get("x-jobs-token") !== expected) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    }
+    return NextResponse.json(await runRetentionJob());
+  }
+
   if (key === "POST jobs/fiscal") {
     const expected = process.env.JOBS_TOKEN;
     if (!expected || request.headers.get("x-jobs-token") !== expected) {
@@ -323,6 +351,47 @@ async function handle(request: NextRequest, parts: string[]) {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => listMessages(ctx, branchId)));
   }
+  if (parts[0] === "retention") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    if (key === "GET retention/settings") return NextResponse.json(await run((ctx) => retentionSettings(ctx, branchId)));
+    if (key === "PATCH retention/settings") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => updateRetentionSettings(ctx, branchId, body)));
+    }
+    if (key === "GET retention/reviews") {
+      return NextResponse.json(
+        await run((ctx) => listReviews(ctx, { branchId, status: url.searchParams.get("status") ?? undefined, staffId: url.searchParams.get("staffId") ?? undefined })),
+      );
+    }
+    if (key === "GET retention/reviews.csv") {
+      const body = await run((ctx) => reviewsCsv(ctx, branchId, url.searchParams.get("from") ?? "", url.searchParams.get("to") ?? ""));
+      return new NextResponse(body, {
+        headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="reviews.csv"` },
+      });
+    }
+    if (method === "POST" && parts[1] === "reviews" && parts[2]) {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => moderateReview(ctx, parts[2], body)));
+    }
+    if (key === "GET retention/waitlist") return NextResponse.json(await run((ctx) => listWaitlist(ctx, branchId, { status: url.searchParams.get("status") ?? undefined })));
+    if (key === "POST retention/waitlist") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => createWaitlistEntry(ctx, { ...(body as unknown as Parameters<typeof createWaitlistEntry>[1]), branchId })));
+    }
+    if (method === "POST" && parts[1] === "waitlist" && parts[2] && parts[3] === "offer") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => offerWaitlistSlot(ctx, parts[2], body)));
+    }
+    if (method === "POST" && parts[1] === "waitlist" && parts[2] && parts[3] === "status") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => closeWaitlistEntry(ctx, parts[2], body)));
+    }
+    if (key === "GET retention/due") return NextResponse.json(await run((ctx) => rebookDue(ctx, branchId)));
+    if (method === "POST" && parts[1] === "due" && parts[2] && parts[3] === "remind") {
+      return NextResponse.json(await run((ctx) => sendRebookReminder(ctx, branchId, parts[2])));
+    }
+  }
+
   if (key === "GET reports/period" || key === "GET reports/period.csv") {
     const query = Object.fromEntries(url.searchParams.entries());
     query.branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
@@ -553,7 +622,17 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (parts[0] === "appointments" && parts[2] === "cancel" && method === "POST") {
     const body = await readJson(request);
-    return NextResponse.json(await run((ctx) => cancelAppointment(ctx, parts[1], body as never)));
+    return NextResponse.json(
+      await run(async (ctx) => {
+        const result = await cancelAppointment(ctx, parts[1], body as never);
+        // WAIT-MATCH-01: whoever waits for this exact time is surfaced to the desk.
+        return { ...result, waitlistMatches: await matchWaitlistOnCancel(ctx, parts[1]) };
+      }),
+    );
+  }
+  if (parts[0] === "appointments" && parts[2] === "rebook" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => rebookAppointment(ctx, parts[1], body)));
   }
   if (parts[0] === "appointments" && parts[2] === "restore" && method === "POST") {
     const body = await readJson(request);
@@ -869,6 +948,14 @@ async function handlePublic(request: NextRequest, parts: string[]) {
       );
     }
   }
+  if (parts[0] === "review" && parts[1]) {
+    const { tenantId, appointmentId } = await resolveReviewToken(parts[1]);
+    if (method === "GET") return NextResponse.json(await asOnline(tenantId, (ctx) => publicReviewInfo(ctx, appointmentId)));
+    if (method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await asOnline(tenantId, (ctx) => submitReview(ctx, appointmentId, body)));
+    }
+  }
   if (parts[0] === "pay" && parts[1]) {
     const { tenantId, id } = await resolvePayToken(parts[1]);
     if (method === "GET" && !parts[2]) return NextResponse.json(await asAcquiring(tenantId, (ctx) => publicPayInfo(ctx, id)));
@@ -884,6 +971,7 @@ async function handlePublic(request: NextRequest, parts: string[]) {
     const { tenantId, branchId } = await resolvePublicBranch(parts[1], parts[2]);
     const action = parts.slice(3).join("/");
     if (method === "GET" && action === "privacy") return NextResponse.json(await asOnline(tenantId, (ctx) => privacyInfo(ctx, branchId)));
+    if (method === "GET" && action === "reviews") return NextResponse.json(await asOnline(tenantId, (ctx) => publicReviews(ctx, branchId)));
     if (method === "GET" && action === "catalog") return NextResponse.json(await asOnline(tenantId, (ctx) => publicCatalog(ctx, branchId)));
     if (method === "GET" && action === "slots") {
       return NextResponse.json(

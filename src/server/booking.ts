@@ -16,6 +16,7 @@ import { many, one, poolOne, withSession } from "./db";
 import { loadWorkingIntervals } from "./hours";
 import type { Actor, BranchRow, Ctx } from "./types";
 import { applyPromo } from "./loyalty";
+import { assertOnlineAllowed, matchWaitlistOnCancel } from "./retention";
 import { appointmentValues, deliverToClient, issueTelegramLink, notifyDesk, publicUrl, render, telegramConfigured, templateBody } from "./messaging";
 
 /** The online channel acts under this fixed id: it has no user row, like the system actor in audit. */
@@ -421,6 +422,8 @@ export async function confirmBooking(
   const service = await loadOnlineService(ctx, hold.service_id);
 
   const client = await findOrCreateClient(ctx, name, phone);
+  // NOSHOW-01: a client with too many no-shows is asked to call the salon.
+  if (!client.created) await assertOnlineAllowed(ctx, branch, client.id);
   await ctx.db.query(
     `UPDATE clients SET consent_pd_at = COALESCE(consent_pd_at, $2), consent_pd_source = COALESCE(consent_pd_source, 'online'),
        consent_marketing = consent_marketing OR $3, consent_marketing_at = CASE WHEN $3 AND NOT consent_marketing THEN $2 ELSE consent_marketing_at END
@@ -605,6 +608,7 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
     action: "appointment.cancelled",
     diff: { reason: reason || null, from: booking.row.status, via: "online" },
   });
+  await matchWaitlistOnCancel(ctx, appointmentId);
   await notifyDesk(ctx, {
     branchId: booking.row.branch_id,
     kind: "booking.cancelled",

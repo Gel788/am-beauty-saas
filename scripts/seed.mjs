@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import pg from "pg";
+import { seedRetention } from "./seed-retention.mjs";
 
 const connectionString = process.env.MIGRATE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/ambeauty";
 const client = new pg.Client({ connectionString });
@@ -139,6 +140,12 @@ const clients = [
   ["Татьяна Волкова", "+79001110017"],
   ["Наталья Соловьёва", "+79001110018"],
   ["Ирина Васильева", "+79001110019"],
+  ["Юлия Новикова", "+79001110020"],
+  ["Елена Васильева", "+79001110021"],
+  ["Ольга Новикова", "+79001110022"],
+  ["Сергей Козлов", "+79001110023"],
+  ["Марина Гусева", "+79001110024"],
+  ["Дина Абрамова", "+79001110025"],
 ];
 const clientIds = {};
 for (const [name, phone] of clients) {
@@ -220,6 +227,8 @@ if (paidAppointment) {
     [crypto.randomUUID(), tenant, paymentId, paidAppointment.price],
   );
 }
+
+await seedRetention(client, { tenant, branch, staff, serviceIds, services, clientIds, adminId: users.admin, today });
 
 await client.query("COMMIT");
 await client.end();

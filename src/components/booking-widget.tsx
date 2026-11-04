@@ -88,6 +88,14 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
   const [form, setForm] = useState({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false });
   const idempotencyKey = useRef<string>("");
 
+  const [ratings, setRatings] = useState<Record<string, { rating: number; count: number }>>({});
+  useEffect(() => {
+    // REV-SHOW-01: published reviews only; the widget works the same without them.
+    call<{ staff: { staffId: string; rating: number; count: number }[] }>(`${base}/reviews`)
+      .then((data) => setRatings(Object.fromEntries(data.staff.map((row) => [row.staffId, row]))))
+      .catch(() => undefined);
+  }, [base]);
+
   useEffect(() => {
     call<Catalog>(`${base}/catalog`)
       .then((data) => {
@@ -275,6 +283,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
               {staffFor.map((member) => (
                 <button key={member.id} className={staffId === member.id ? "on" : ""} onClick={() => setStaffId(member.id)}>
                   <i style={{ background: member.color }} />{member.name}
+                  {ratings[member.id] && <span className="widget-rating"> ★ {ratings[member.id].rating.toFixed(1)}</span>}
                 </button>
               ))}
             </div>

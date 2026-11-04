@@ -5,7 +5,7 @@ import { formatMoney, rublesToMinor } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 
-type Service = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[]; categoryId: string | null };
+type Service = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[]; categoryId: string | null; rebookDays: number | null };
 type Staff = { id: string; displayName: string };
 type Category = { id: string; title: string };
 
@@ -83,6 +83,18 @@ export function ServicesView() {
               <strong>{service.title}{!service.active ? " · скрыта" : ""}</strong>
               <span>{service.durationMin} мин · {formatMoney(service.priceMinor)} · мастеров {service.staffIds.length}</span>
             </div>
+            <select
+              className="rebook-select"
+              title="Через сколько дней позвать клиента снова"
+              value={service.rebookDays ?? ""}
+              onChange={async (event) => {
+                await api(`/api/services/${service.id}`, { method: "PATCH", body: JSON.stringify({ rebookDays: event.target.value ? Number(event.target.value) : null }) });
+                await load();
+              }}
+            >
+              <option value="">Без повтора</option>
+              {[14, 21, 28, 35, 42, 60, 90].map((days) => <option key={days} value={days}>Повтор через {days} дн.</option>)}
+            </select>
             <button className="btn-ghost" type="button" disabled={index === 0} onClick={async () => {
               const ids = services.map((item) => item.id);
               [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];

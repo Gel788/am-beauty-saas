@@ -50,6 +50,8 @@ export function RecordDrawer({
   const [status, setStatus] = useState<AppointmentStatus>("scheduled");
   const [clientId, setClientId] = useState<string | null>(null);
   const [clientName, setClientName] = useState("");
+  const [noShows, setNoShows] = useState(0);
+  const [rebooked, setRebooked] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ClientHit[]>([]);
   const [creatingClient, setCreatingClient] = useState(false);
@@ -121,6 +123,7 @@ export function RecordDrawer({
       status: AppointmentStatus;
       clientId: string | null;
       clientName: string | null;
+      clientNoShows: number;
       staffId: string;
       startsAt: string;
       comment: string;
@@ -136,6 +139,7 @@ export function RecordDrawer({
       setStatus(row.status);
       setClientId(row.clientId);
       setClientName(row.clientName ?? "");
+      setNoShows(row.clientNoShows ?? 0);
       setStaffId(row.staffId);
       const start = new Date(row.startsAt);
       const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(start);
@@ -260,16 +264,33 @@ export function RecordDrawer({
     }
   }
 
+  /** REBOOK-01: same master, same services, same time N weeks later (or the nearest free time). */
+  async function rebook(weeks: number) {
+    if (!seed.id) return;
+    setBusy(true);
+    try {
+      const result = await api<{ appointment: { startsAt: string }; exact: boolean }>(`/api/appointments/${seed.id}/rebook`, { method: "POST", body: JSON.stringify({ weeks }) });
+      const when = new Intl.DateTimeFormat("ru-RU", { timeZone: timezone, weekday: "short", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(result.appointment.startsAt));
+      setRebooked(when);
+      toast(result.exact ? `Записали: ${when}` : `То же время занято — записали на ${when}`);
+      onRefresh?.();
+    } catch (error) {
+      toast((error as ApiError).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function cancelVisit() {
     if (!seed.id) return;
     const reason = window.prompt("Причина отмены");
     if (!reason) return;
     try {
-      const result = await api<{ version: number; refundSuggested?: boolean }>(`/api/appointments/${seed.id}/cancel`, {
+      const result = await api<{ version: number; refundSuggested?: boolean; waitlistMatches?: number }>(`/api/appointments/${seed.id}/cancel`, {
         method: "POST",
         body: JSON.stringify({ version, reason, confirm: true }),
       });
-      toast("Запись отменена");
+      toast(result.waitlistMatches ? `Запись отменена. Это время ждут ${result.waitlistMatches} из листа ожидания — см. «Удержание»` : "Запись отменена");
       if (result.refundSuggested) {
         // CASH §9: cancelling a prepaid visit offers PAY-REFUND right here.
         setStatus("cancelled");
@@ -371,6 +392,7 @@ export function RecordDrawer({
           <div>
             <div className="page-kicker">{seed.id ? STATUS_LABEL[status] : "Новая запись"} {source === "online" ? "· онлайн" : ""}</div>
             <h2 className="display" style={{ fontSize: 26 }}>{clientName || "Запись"}</h2>
+            {seed.id && noShows > 0 && <span className="tag noshow-flag" title="За последний год">неявок: {noShows}</span>}
           </div>
           <button className="icon-btn" onClick={askClose} aria-label="Закрыть">×</button>
         </div>
@@ -456,6 +478,14 @@ export function RecordDrawer({
                   </button>
                 ))}
                 <button className="chip danger" type="button" onClick={cancelVisit}>Отменить</button>
+              </div>
+            )}
+            {seed.id && clientId && ["arrived", "in_progress", "completed"].includes(status) && (
+              <div className="rebook-box">
+                <b>{rebooked ? `Записали на ${rebooked}` : "Записать снова к этому мастеру"}</b>
+                {!rebooked && [2, 3, 4, 6].map((weeks) => (
+                  <button key={weeks} type="button" className="chip" disabled={busy} onClick={() => rebook(weeks)}>через {weeks} нед.</button>
+                ))}
               </div>
             )}
             <button className="btn-gradient" type="button" disabled={busy || (typeof navigator !== "undefined" && !navigator.onLine)} onClick={() => save()}>Сохранить</button>

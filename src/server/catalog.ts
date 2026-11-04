@@ -94,9 +94,13 @@ export async function updateService(
     onlineVisible: boolean;
     active: boolean;
     bufferAfterMin: number;
+    rebookDays: number | null;
   }>,
 ) {
   assertCatalog(ctx);
+  if (input.rebookDays !== undefined && input.rebookDays !== null && !(Number.isInteger(input.rebookDays) && input.rebookDays >= 1 && input.rebookDays <= 365)) {
+    throw new AppError("VALIDATION", "Повторный визит: от 1 до 365 дней");
+  }
   const current = await one<{ id: string }>(ctx.db, "SELECT id FROM services WHERE id = $1", [id]);
   if (!current) throw new AppError("NOT_FOUND", "Услуга не найдена");
   if (input.durationMin !== undefined && (input.durationMin < 5 || input.durationMin % 5 !== 0)) {
@@ -114,7 +118,8 @@ export async function updateService(
        category_id = CASE WHEN $6 THEN $7::uuid ELSE category_id END,
        online_visible = COALESCE($8, online_visible),
        active = COALESCE($9, active),
-       buffer_after_min = COALESCE($10, buffer_after_min)
+       buffer_after_min = COALESCE($10, buffer_after_min),
+       rebook_days = CASE WHEN $11 THEN $12::int ELSE rebook_days END
      WHERE id = $1`,
     [
       id,
@@ -127,6 +132,8 @@ export async function updateService(
       input.onlineVisible ?? null,
       input.active ?? null,
       input.bufferAfterMin ?? null,
+      input.rebookDays !== undefined,
+      input.rebookDays ?? null,
     ],
   );
   return getService(ctx, id);
@@ -184,6 +191,7 @@ async function getService(ctx: Ctx, id: string) {
     active: boolean;
     sort: number;
     buffer_after_min: number;
+    rebook_days: number | null;
   }>(ctx.db, "SELECT * FROM services WHERE id = $1", [id]);
   if (!row) throw new AppError("NOT_FOUND", "Услуга не найдена");
   const staff = await many<{ staff_id: string }>(ctx.db, "SELECT staff_id FROM service_staff WHERE service_id = $1", [id]);
@@ -198,6 +206,7 @@ async function getService(ctx: Ctx, id: string) {
     active: row.active,
     sort: Number(row.sort),
     bufferAfterMin: Number(row.buffer_after_min),
+    rebookDays: row.rebook_days === null ? null : Number(row.rebook_days),
     staffIds: staff.map((item) => item.staff_id),
   };
 }

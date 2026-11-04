@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Banknote, BarChart3, Boxes, Gift, CalendarDays, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Boxes, Gift, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
@@ -26,6 +26,7 @@ const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: s
   { href: "/cash", label: "Финансы", icon: Wallet, roles: [...DESK, "accountant"] },
   { href: "/inventory", label: "Склад", icon: Boxes, roles: [...DESK, "accountant"] },
   { href: "/loyalty", label: "Лояльность", icon: Gift, roles: DESK },
+  { href: "/retention", label: "Удержание", icon: HeartHandshake, roles: [...DESK, "master"], masterLabel: "Мои отзывы" },
   { href: "/reports", label: "Отчёты", icon: BarChart3, roles: [...DESK, "accountant", "master"], masterLabel: "Мои показатели" },
   { href: "/payroll", label: "Зарплаты", icon: Banknote, roles: [...DESK, "accountant", "master"], masterLabel: "Моя зарплата" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: DESK },

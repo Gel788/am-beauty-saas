@@ -68,6 +68,12 @@ export type BranchRow = {
   acquiring_link_hours: number;
   external_receipts: boolean;
   booking_message_enabled: boolean;
+  review_enabled: boolean;
+  review_delay_hours: number;
+  review_moderation: boolean;
+  noshow_block_after: number;
+  rebook_enabled: boolean;
+  birthday_enabled: boolean;
   /** Present only when the query joins tenants. */
   tenant_slug?: string;
 };

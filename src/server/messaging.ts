@@ -128,20 +128,28 @@ export function channelCatalog() {
 
 // ---------------------------------------------------------------- Templates
 
-export type TemplateKey = "reminder" | "booking_created" | "booking_cancelled" | "pay_link";
+export type TemplateKey = "reminder" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday";
 export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
   reminder: "Напоминаем о записи в {салон}{адрес}: {когда}. {услуги}, мастер {мастер}. Подтвердите или отмените визит: {ссылка}",
   booking_created: "Вы записаны в {салон}: {когда}, {услуги}, мастер {мастер}. Управлять записью: {ссылка}",
   booking_cancelled: "Запись в {салон} на {когда} отменена. Будем рады видеть вас снова!",
   pay_link: "{салон}: ссылка на оплату {сумма} — {ссылка}",
+  review_request: "{имя}, спасибо, что были у нас в {салон}! Как вам визит к мастеру {мастер}? Оцените, это займёт минуту: {ссылка}",
+  waitlist_offer: "{имя}, освободилось время в {салон}: {когда}, мастер {мастер}. Записаться: {ссылка}",
+  rebook: "{имя}, с последнего визита в {салон} прошло {дней} дн. — самое время обновить {услуги}. Записаться: {ссылка}",
+  birthday: "{имя}, {салон} поздравляет вас с днём рождения! Ждём в гости: {ссылка}",
 };
 export const TEMPLATE_LABEL: Record<TemplateKey, string> = {
   reminder: "Напоминание о визите",
   booking_created: "Запись создана",
   booking_cancelled: "Запись отменена",
   pay_link: "Ссылка на оплату",
+  review_request: "Просьба об отзыве",
+  waitlist_offer: "Предложение окна из листа ожидания",
+  rebook: "Пора на повторный визит",
+  birthday: "Поздравление с днём рождения",
 };
-export const PLACEHOLDERS = ["{имя}", "{салон}", "{адрес}", "{когда}", "{услуги}", "{мастер}", "{сумма}", "{ссылка}"];
+export const PLACEHOLDERS = ["{имя}", "{салон}", "{адрес}", "{когда}", "{услуги}", "{мастер}", "{сумма}", "{ссылка}", "{дней}"];
 
 export function render(template: string, values: Record<string, string>) {
   return template
@@ -252,7 +260,7 @@ export async function deliverToClient(
     clientId: string;
     branchId: string | null;
     appointmentId?: string | null;
-    kind: "reminder" | "manual" | "booking_created" | "booking_cancelled" | "pay_link";
+    kind: "reminder" | "manual" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday";
     body: string;
     buttons?: Button[];
     /** Unique kinds (reminder) skip silently when already logged. */
