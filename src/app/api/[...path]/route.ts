@@ -212,12 +212,15 @@ function fail(error: unknown) {
 }
 
 function cookie(response: NextResponse, token: string) {
+  // Only mark Secure when the public origin is HTTPS; plain HTTP IP deploys
+  // otherwise get a cookie the browser silently drops.
+  const publicUrl = process.env.PUBLIC_URL ?? "";
   response.cookies.set("ab_session", token, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
-    secure: process.env.NODE_ENV === "production",
+    secure: publicUrl.startsWith("https://"),
   });
   return response;
 }
