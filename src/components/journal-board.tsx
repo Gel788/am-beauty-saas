@@ -414,7 +414,7 @@ export function JournalBoard() {
             </div>
           )}
           {journal && visibleStaff.length > 0 && (
-            <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${visibleStaff.length}, minmax(0, 1fr))` }}>
+            <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${visibleStaff.length}, minmax(0, 1fr))`, ["--cols" as string]: visibleStaff.length }}>
               <div />
               {visibleStaff.map((staff) => {
                 const photo = portraitFor(staff.name);
@@ -545,7 +545,7 @@ function ResourceGrid({ journal, hours, onOpen, onOpenGroup, staffName }: { jour
   const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
   return (
     <div className="cal-scroll">
-      <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${resources.length}, minmax(0, 1fr))` }}>
+      <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${resources.length}, minmax(0, 1fr))`, ["--cols" as string]: resources.length }}>
         <div />
         {resources.map((resource) => (
           <div className="master-head" key={resource.id}>

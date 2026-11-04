@@ -340,7 +340,7 @@ function WeekEditor({
       {saved === null ? (
         <div className="skeleton" />
       ) : (
-        <div className="week-grid">
+        <div className="sched-week">
           {DAYS.map((label, index) => {
             const weekday = index + 1;
             const rows = dayRows(weekday);
