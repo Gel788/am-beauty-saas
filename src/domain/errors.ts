@@ -9,7 +9,8 @@ export type ErrorCode =
   | "STALE"
   | "SOFT_CONFIRM"
   | "PLAN_LIMIT"
-  | "PAYMENT_REQUIRED";
+  | "PAYMENT_REQUIRED"
+  | "RATE_LIMITED";
 
 export class AppError extends Error {
   readonly code: ErrorCode;

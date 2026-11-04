@@ -916,3 +916,21 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .state-trial { color: #6a3fd6; } .state-active { color: #137a45; } .state-grace { color: #93540c; } .state-expired, .state-suspended { color: #b0204f; }
 @media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr; } }
 .platform-table td.nowrap { white-space: nowrap; }
+/* Phase 4 · API: keys and webhooks */
+#api .branch-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 14px; background: white; border: 1px solid var(--line); }
+#api .branch-card > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#api .branch-card small { font-size: 12px; }
+#api .branch-card.revoked { opacity: 0.55; }
+#api .branch-card .chip { margin-left: 6px; padding: 2px 8px; font-size: 11px; font-weight: 500; }
+#api .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+#api .chip-row .chip { cursor: pointer; }
+.secret-once { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: #f1fbf5; border: 1px solid #bfe8cf; }
+.secret-once code { font-size: 13px; padding: 6px 10px; border-radius: 8px; background: white; border: 1px solid var(--line); word-break: break-all; }
+.dev-page { max-width: 920px; margin: 0 auto; padding: 32px 16px 80px; display: flex; flex-direction: column; gap: 18px; }
+.dev-page pre { background: #1f1a2b; color: #f3eefc; padding: 14px 16px; border-radius: 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+.dev-page code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dev-page table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.dev-page th, .dev-page td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.dev-page .method { display: inline-block; min-width: 52px; font-weight: 700; font-size: 12px; color: #6a3fd6; }
+.dev-page .method.post { color: #137a45; }
+.secret-once .btn { display: inline-flex; align-items: center; gap: 6px; }

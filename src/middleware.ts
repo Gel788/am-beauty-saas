@@ -14,6 +14,7 @@ export function middleware(request: NextRequest) {
     pathname === "/sw.js" ||
     pathname === "/offline.html" ||
     pathname === "/manifest.webmanifest" ||
+    pathname.startsWith("/developers") ||
     /\.(?:png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(pathname)
   ) {
     return NextResponse.next();
