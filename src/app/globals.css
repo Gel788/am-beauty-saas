@@ -1023,3 +1023,54 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 @media (max-width: 420px) {
   .report-tiles { grid-template-columns: 1fr; }
 }
+
+/* PLAT-CABINET-*: platform owner's cabinet */
+.plat-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.report-tile.warn { box-shadow: inset 0 0 0 2px #ffd59a; }
+.plat-bars { display: flex; align-items: flex-end; gap: 6px; height: 180px; padding-top: 8px; }
+.plat-bars.small { height: 110px; }
+.plat-bar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; }
+.plat-bar i { display: block; width: 100%; max-width: 38px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, #b388ff, #f15bb5); }
+.plat-bar small { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.plat-bar span { font-size: 11px; color: var(--faint); }
+.plat-plan { display: grid; grid-template-columns: 80px 1fr 32px; align-items: center; gap: 10px; font-size: 14px; }
+.plat-plan b { text-align: right; }
+.plat-risk { align-items: center; }
+.plat-reasons { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.plat-scroll { overflow-x: auto; }
+.plat-row { cursor: pointer; }
+.plat-row:hover td { background: #faf6fd; }
+.plat-task-form { display: grid; grid-template-columns: 1fr 200px 150px auto; gap: 8px; align-items: center; }
+.plat-task-form input, .plat-task-form select { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; background: white; min-width: 0; }
+.plat-drawer .plat-task-form { grid-template-columns: 1fr 140px auto; padding: 0; box-shadow: none; background: transparent; border: 0; }
+.plat-task { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: white; box-shadow: 0 4px 12px rgba(80, 40, 110, 0.04); }
+.plat-task.done strong { text-decoration: line-through; color: var(--muted); }
+.plat-task input[type="checkbox"] { width: 18px; height: 18px; flex: none; }
+.plat-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plat-task .btn-ghost { padding: 4px 10px; }
+.link-btn { border: 0; background: none; padding: 0; color: #6d4fe0; font: inherit; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.plat-feed { display: flex; flex-direction: column; }
+.plat-event { display: flex; gap: 10px; align-items: center; padding: 8px 2px; border-bottom: 1px solid rgba(80, 40, 110, 0.06); }
+.plat-event > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.plat-event i { font-style: normal; width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: #f3ecff; color: #6d4fe0; flex: none; font-size: 13px; }
+.plat-event.ev-paid i { background: #e7f8ef; color: #0f7a46; }
+.plat-event.ev-suspended i { background: #ffe4ea; color: #b4123c; }
+.plat-event.ev-signup i { background: #fff1db; color: #93540c; }
+.plat-event b { white-space: nowrap; font-size: 14px; }
+.plat-drawer { width: min(560px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.plat-kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; font-size: 14px; }
+.plat-kv span { color: var(--muted); }
+.plat-kv b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.plat-mini { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.plat-mini > div { background: white; border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 2px; box-shadow: 0 4px 12px rgba(80, 40, 110, 0.04); }
+.plat-mini b { font-family: var(--font-unbounded); font-weight: 520; font-size: 17px; letter-spacing: -0.03em; white-space: nowrap; }
+.plat-mini span { font-size: 11.5px; color: var(--muted); }
+.plat-inv { font-size: 14px; }
+@media (max-width: 900px) {
+  .plat-tiles { grid-template-columns: 1fr 1fr; }
+  .plat-task-form { grid-template-columns: 1fr 1fr; }
+  .plat-task-form input:first-child { grid-column: 1 / -1; }
+  .plat-mini { grid-template-columns: 1fr 1fr; }
+}
+.danger-text { color: #b4123c; }

@@ -1,4 +1,5 @@
 import { createBranch, currentBranchId, networkSummary, orderByCurrent, setCurrentBranch } from "@/server/network";
+import { platformCreateTask, platformDeleteTask, platformEvents, platformInvoices, platformOverview, platformSetTaskDone, platformTasks, platformTenantDetail } from "@/server/platform";
 import { assertWritable, billingSummary, createInvoice, handleBillingWebhook, isPlatformAdmin, platformTenants, platformUpdateTenant, sandboxPayInvoice, tenantAccess } from "@/server/billing";
 import { authenticateApiKey, createApiKey, listApiKeys, rateLimit, revokeApiKey, runAsApi, v1Appointment, v1Appointments, v1Branches, v1CancelAppointment, v1Client, v1Clients, v1CreateAppointment, v1CreateClient, v1Services, v1Staff } from "@/server/public-api";
 import { createWebhook, deleteWebhook, listWebhooks, pingWebhook, runWebhookJob, runWebhooksForTenant } from "@/server/webhooks";
@@ -418,6 +419,16 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json(await asActor(actor, (ctx) => sandboxPayInvoice(ctx, parts[2])));
   }
   if (key === "GET platform/tenants") return NextResponse.json(await platformTenants(actor));
+  if (key === "GET platform/overview") return NextResponse.json(await platformOverview(actor));
+  if (key === "GET platform/invoices") return NextResponse.json(await platformInvoices(actor));
+  if (key === "GET platform/events") return NextResponse.json(await platformEvents(actor, Number(url.searchParams.get("limit") ?? 100)));
+  if (key === "GET platform/tasks") return NextResponse.json(await platformTasks(actor));
+  if (key === "POST platform/tasks") return NextResponse.json(await platformCreateTask(actor, await readJson(request)), { status: 201 });
+  if (parts[0] === "platform" && parts[1] === "tasks" && parts[2] && parts.length === 3) {
+    if (method === "PATCH") return NextResponse.json(await platformSetTaskDone(actor, parts[2], (await readJson(request)).done));
+    if (method === "DELETE") return NextResponse.json(await platformDeleteTask(actor, parts[2]));
+  }
+  if (method === "GET" && parts[0] === "platform" && parts[1] === "tenants" && parts[2] && parts.length === 3) return NextResponse.json(await platformTenantDetail(actor, parts[2]));
   if (method === "PATCH" && parts[0] === "platform" && parts[1] === "tenants" && parts[2]) {
     return NextResponse.json(await platformUpdateTenant(actor, parts[2], await readJson(request)));
   }
