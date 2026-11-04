@@ -862,6 +862,7 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .plat-event.ev-signup i { background: #fff1db; color: #93540c; }
 .plat-event b { white-space: nowrap; font-size: 14px; }
 .plat-drawer { width: min(560px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.plat-drawer > * { flex-shrink: 0; }
 .plat-kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; font-size: 14px; }
 .plat-kv span { color: var(--muted); }
 .plat-kv b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
