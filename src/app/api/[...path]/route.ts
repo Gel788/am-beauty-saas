@@ -500,7 +500,8 @@ async function handle(request: NextRequest, parts: string[]) {
     }
     if (kind === "items" && !id && method === "POST") {
       const body = await readJson(request);
-      return NextResponse.json(await run((ctx) => createItem(ctx, body as never)));
+      const branchId = Number(body.initialQty) > 0 ? await branchFrom(body.branchId) : undefined;
+      return NextResponse.json(await run((ctx) => createItem(ctx, { ...body, branchId } as never)));
     }
     if (kind === "items" && id && method === "PATCH") {
       const body = await readJson(request);
