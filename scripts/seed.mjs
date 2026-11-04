@@ -297,6 +297,29 @@ await client.query(
 await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id = $1", [serviceIds.spa]);
 await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
 
+// INV-ITEM-*: a stocked warehouse — consumables and retail, a couple of them running low.
+for (const [sku, title, unit, costMinor, sellMinor, qty, minQty] of [
+  ["GEL-01", "Гель-лак Kodi, 12 мл", "ml", 2500, 0, 840, 200],
+  ["BASE-01", "База каучуковая, 15 мл", "ml", 2200, 0, 120, 150],
+  ["TOP-01", "Топ без липкого слоя, 15 мл", "ml", 2000, 0, 300, 100],
+  ["GLOVE-01", "Перчатки нитриловые", "pcs", 900, 0, 46, 100],
+  ["FILE-01", "Пилка 180/240", "pcs", 4000, 0, 60, 20],
+  ["PAINT-01", "Краска для бровей", "g", 3500, 0, 90, 30],
+  ["CREAM-01", "Крем для рук, 50 мл", "pcs", 45000, 99000, 12, 5],
+  ["OIL-01", "Масло для кутикулы", "pcs", 30000, 69000, 3, 5],
+]) {
+  const id = crypto.randomUUID();
+  await client.query(
+    "INSERT INTO inventory_items (id, tenant_id, sku, title, unit, cost_minor, sell_price_minor, for_sale, min_qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    [id, tenant, sku, title, unit, costMinor, sellMinor, sellMinor > 0, minQty],
+  );
+  await client.query(
+    "INSERT INTO stock_movements (id, tenant_id, branch_id, item_id, type, qty, cost_minor, document, created_by) VALUES ($1,$2,$3,$4,'receipt',$5,$6,'Начальный остаток',$7)",
+    [crypto.randomUUID(), tenant, branch, id, qty, costMinor, users.olga],
+  );
+  await client.query("INSERT INTO stock_balances (tenant_id, item_id, branch_id, qty) VALUES ($1,$2,$3,$4)", [tenant, id, branch, qty]);
+}
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);

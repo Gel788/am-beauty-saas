@@ -16,6 +16,7 @@ type Item = {
   sellPriceMinor: number;
   forSale: boolean;
   active: boolean;
+  minQty: number;
   qty: number;
   totalQty: number;
 };
@@ -110,9 +111,15 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
   const { items, reload } = useItems(branch.id, archived);
   const [modal, setModal] = useState<null | "item" | "receipt" | "writeoff" | "transfer">(null);
   const [preset, setPreset] = useState<string>("");
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [search, setSearch] = useState("");
   const tracked = (items ?? []).filter((item) => item.trackStock && item.active);
   const stockValue = tracked.reduce((sum, item) => sum + Math.max(0, item.qty) * item.costMinor, 0);
   const negatives = tracked.filter((item) => item.qty < 0).length;
+  const isLow = (item: Item) => item.trackStock && item.active && item.minQty > 0 && item.qty <= item.minQty;
+  const low = tracked.filter(isLow);
+  const needle = search.trim().toLowerCase();
+  const shown = (items ?? []).filter((item) => !needle || item.title.toLowerCase().includes(needle) || item.sku.toLowerCase().includes(needle));
 
   function open(kind: typeof modal, itemId = "") {
     setPreset(itemId);
@@ -152,9 +159,12 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
           <small className="muted">в филиале «{branch.name}»</small>
         </div>
         <div className="panel report-tile">
-          <span className="muted">Ушло в минус</span>
-          <b className="display">{negatives}</b>
-          <small className="muted">{negatives ? "проверьте приход или проведите инвентаризацию" : "отрицательных остатков нет"}</small>
+          <span className="muted">Заканчивается</span>
+          <b className="display">{low.length}</b>
+          <small className="muted">
+            {low.length ? low.slice(0, 3).map((item) => item.title).join(", ") + (low.length > 3 ? "…" : "") : "всё выше минимального остатка"}
+            {negatives ? ` · в минусе: ${negatives}` : ""}
+          </small>
         </div>
       </div>
       {canWrite && (
@@ -163,6 +173,7 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
           <button className="btn" onClick={() => open("writeoff")}>Списание</button>
           {branches.length > 1 && <button className="btn" onClick={() => open("transfer")}>Перемещение</button>}
           <button className="btn-ghost" onClick={() => open("item")}>+ Новая позиция</button>
+          <input className="search" style={{ flex: "1 1 180px", maxWidth: 280 }} placeholder="Найти по названию или артикулу" value={search} onChange={(event) => setSearch(event.target.value)} />
           <label className="row muted" style={{ marginLeft: "auto" }}>
             <input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} /> показать архив
           </label>
@@ -175,14 +186,26 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
           </thead>
           <tbody>
             {items === null && <tr><td colSpan={6} className="muted">Загрузка…</td></tr>}
-            {items?.length === 0 && <tr><td colSpan={6} className="muted">Номенклатуры пока нет. Добавьте расходники и товары</td></tr>}
-            {items?.map((item) => (
+            {items?.length === 0 && (
+              <tr>
+                <td colSpan={6}>
+                  <div className="list" style={{ alignItems: "flex-start", padding: "12px 0" }}>
+                    <b>На складе пока пусто</b>
+                    <span className="muted">Добавьте расходники (гель-лаки, краски, перчатки) и товары на продажу. Сразу укажите, сколько их сейчас на полке, и минимальный остаток: CRM подскажет, когда пора заказывать.</span>
+                    {canWrite && <button className="btn-gradient" onClick={() => open("item")}>+ Добавить первую позицию</button>}
+                  </div>
+                </td>
+              </tr>
+            )}
+            {items && items.length > 0 && shown.length === 0 && <tr><td colSpan={6} className="muted">Ничего не нашлось</td></tr>}
+            {shown.map((item) => (
               <tr key={item.id} className={item.active ? "" : "void"}>
                 <td className="muted">{item.sku}</td>
                 <td>
                   {item.title}
                   {item.forSale && <span className="tag tag-ok" style={{ marginLeft: 6 }}>продаётся</span>}
                   {!item.trackStock && <span className="tag tag-muted" style={{ marginLeft: 6 }}>без учёта</span>}
+                  {isLow(item) && <span className="tag tag-warn" style={{ marginLeft: 6 }}>заканчивается</span>}
                 </td>
                 <td className="num">{formatMoney(item.costMinor)} / {UNITS[item.unit]}</td>
                 <td className="num">{item.forSale ? formatMoney(item.sellPriceMinor) : "—"}</td>
@@ -198,6 +221,7 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
                     {item.active ? (
                       <div className="row" style={{ justifyContent: "flex-end" }}>
                         {item.trackStock && <button className="btn-ghost" onClick={() => open("receipt", item.id)}>Приход</button>}
+                        <button className="btn-ghost" onClick={() => setEditing(item)}>Изменить</button>
                         <button className="btn danger" onClick={() => remove(item)}>Убрать</button>
                       </div>
                     ) : (
@@ -210,7 +234,8 @@ function Stock({ branch, branches, canWrite }: { branch: Branch; branches: Branc
           </tbody>
         </table>
       </div>
-      {modal === "item" && <ItemModal onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
+      {modal === "item" && <ItemModal branchId={branch.id} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
+      {editing && <ItemModal branchId={branch.id} item={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />}
       {modal === "receipt" && <ReceiptModal branchId={branch.id} items={tracked} preset={preset} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal === "writeoff" && <WriteOffModal branchId={branch.id} items={tracked} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal === "transfer" && <TransferModal branch={branch} branches={branches} items={tracked} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
@@ -238,15 +263,51 @@ function useSubmit(onDone: () => void) {
   };
 }
 
-function ItemModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { busy, submit } = useSubmit(onDone);
-  const [form, setForm] = useState({ sku: "", title: "", unit: "pcs" as Unit, cost: "", price: "", forSale: false, trackStock: true });
+function ItemModal({ branchId, item, onClose, onDone }: { branchId: string; item?: Item; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const money = (minor: number) => (minor ? String(minor / 100) : "");
+  const [form, setForm] = useState({
+    sku: item?.sku ?? "",
+    title: item?.title ?? "",
+    unit: (item?.unit ?? "pcs") as Unit,
+    cost: money(item?.costMinor ?? 0),
+    price: money(item?.sellPriceMinor ?? 0),
+    forSale: item?.forSale ?? false,
+    trackStock: item?.trackStock ?? true,
+    initial: "",
+    min: item?.minQty ? String(item.minQty) : "",
+  });
+  async function save() {
+    setBusy(true);
+    const body = {
+      sku: form.sku,
+      title: form.title,
+      unit: form.unit,
+      costMinor: rub(form.cost),
+      sellPriceMinor: form.forSale ? rub(form.price) : 0,
+      forSale: form.forSale,
+      trackStock: form.trackStock,
+      minQty: form.trackStock ? form.min.replace(",", ".") || 0 : 0,
+      ...(item ? {} : { branchId, initialQty: form.trackStock ? form.initial.replace(",", ".") || 0 : 0 }),
+    };
+    try {
+      await api(item ? `/api/inventory/items/${item.id}` : "/api/inventory/items", { method: item ? "PATCH" : "POST", body: JSON.stringify(body) });
+      toast(item ? "Позиция сохранена" : "Позиция добавлена");
+      onDone();
+    } catch (err) {
+      toast((err as ApiError).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const unit = UNITS[form.unit];
   return (
-    <Modal title="Новая позиция" onClose={onClose}>
+    <Modal title={item ? "Позиция" : "Новая позиция"} onClose={onClose}>
       <div className="list">
-        <div className="field"><label>Название</label><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} autoFocus /></div>
+        <div className="field"><label>Название</label><input value={form.title} placeholder="Гель-лак Kodi 12 мл" onChange={(event) => setForm({ ...form, title: event.target.value })} autoFocus /></div>
         <div className="row">
-          <div className="field" style={{ flex: 1 }}><label>Артикул</label><input value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} /></div>
+          <div className="field" style={{ flex: 1 }}><label>Артикул</label><input value={form.sku} placeholder="можно не заполнять" onChange={(event) => setForm({ ...form, sku: event.target.value })} /></div>
           <div className="field">
             <label>Единица</label>
             <select value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value as Unit })}>
@@ -254,25 +315,20 @@ function ItemModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
             </select>
           </div>
         </div>
-        <div className="field"><label>Себестоимость за {UNITS[form.unit]}, ₽</label><input inputMode="decimal" value={form.cost} onChange={(event) => setForm({ ...form, cost: event.target.value })} /></div>
+        <div className="field"><label>Себестоимость за {unit}, ₽</label><input inputMode="decimal" value={form.cost} onChange={(event) => setForm({ ...form, cost: event.target.value })} /></div>
         <label className="row"><input type="checkbox" checked={form.forSale} onChange={(event) => setForm({ ...form, forSale: event.target.checked })} /> продаётся клиентам в кассе</label>
         {form.forSale && <div className="field"><label>Цена продажи, ₽</label><input inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></div>}
         <label className="row"><input type="checkbox" checked={form.trackStock} onChange={(event) => setForm({ ...form, trackStock: event.target.checked })} /> вести остатки</label>
+        {form.trackStock && (
+          <div className="row">
+            {!item && <div className="field" style={{ flex: 1 }}><label>Сейчас на полке, {unit}</label><input inputMode="decimal" value={form.initial} placeholder="0" onChange={(event) => setForm({ ...form, initial: event.target.value })} /></div>}
+            <div className="field" style={{ flex: 1 }}><label>Минимальный остаток, {unit}</label><input inputMode="decimal" value={form.min} placeholder="не следить" onChange={(event) => setForm({ ...form, min: event.target.value })} /></div>
+          </div>
+        )}
+        {item?.trackStock && <small className="muted">Остаток меняется приходом, списанием или инвентаризацией, так история не теряется.</small>}
         <div className="row">
           <button className="btn" onClick={onClose}>Отмена</button>
-          <button
-            className="btn-gradient"
-            disabled={busy}
-            onClick={() =>
-              submit(
-                "/api/inventory/items",
-                { sku: form.sku, title: form.title, unit: form.unit, costMinor: rub(form.cost), sellPriceMinor: form.forSale ? rub(form.price) : 0, forSale: form.forSale, trackStock: form.trackStock },
-                "Позиция добавлена",
-              )
-            }
-          >
-            Добавить
-          </button>
+          <button className="btn-gradient" disabled={busy} onClick={save}>{item ? "Сохранить" : "Добавить"}</button>
         </div>
       </div>
     </Modal>

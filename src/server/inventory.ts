@@ -17,6 +17,7 @@ type ItemRow = {
   sell_price_minor: number;
   for_sale: boolean;
   active: boolean;
+  min_qty: string | number;
 };
 
 const WRITE_ROLES = ["owner", "admin", "accountant", "super"];
@@ -55,6 +56,7 @@ function presentItem(row: ItemRow & { qty?: unknown; total_qty?: unknown }) {
     sellPriceMinor: Number(row.sell_price_minor),
     forSale: row.for_sale,
     active: row.active,
+    minQty: num(row.min_qty),
     qty: num(row.qty),
     totalQty: num(row.total_qty),
   };
@@ -91,28 +93,39 @@ type ItemInput = {
   costMinor?: number;
   sellPriceMinor?: number;
   forSale?: boolean;
+  minQty?: unknown;
 };
 
 function validateItem(input: ItemInput) {
   const sku = input.sku?.trim() ?? "";
   const title = input.title?.trim() ?? "";
-  if (!sku) throw new AppError("VALIDATION", "Укажите артикул");
   if (!title) throw new AppError("VALIDATION", "Укажите название");
   if (input.unit && !(input.unit in UNITS)) throw new AppError("VALIDATION", "Единица: шт, мл, г или уп");
   for (const [value, label] of [[input.costMinor, "Себестоимость"], [input.sellPriceMinor, "Цена продажи"]] as const) {
     const n = Number(value ?? 0);
     if (!Number.isInteger(n) || n < 0) throw new AppError("VALIDATION", `${label}: сумма в копейках ≥ 0`);
   }
-  return { sku, title };
+  const min = input.minQty === undefined || input.minQty === null || input.minQty === "" ? 0 : Number(String(input.minQty).replace(",", "."));
+  if (!Number.isFinite(min) || min < 0) throw new AppError("VALIDATION", "Минимальный остаток: число ≥ 0");
+  return { sku, title, minQty: Math.round(min * 1000) / 1000 };
 }
 
-export async function createItem(ctx: Ctx, input: ItemInput) {
+/** INV-ITEM-01: an empty article number is filled in as P-0001, P-0002, … */
+async function nextSku(ctx: Ctx) {
+  const row = await one<{ n: number }>(ctx.db, "SELECT COALESCE(MAX((substring(sku FROM '^P-(\\d+)$'))::int), 0) + 1 AS n FROM inventory_items");
+  return `P-${String(Number(row?.n ?? 1)).padStart(4, "0")}`;
+}
+
+export async function createItem(ctx: Ctx, input: ItemInput & { branchId?: string; initialQty?: unknown }) {
   assertWrite(ctx);
-  const { sku, title } = validateItem(input);
+  const valid = validateItem(input);
+  const { title, minQty } = valid;
+  const sku = valid.sku || (await nextSku(ctx));
+  if (await one(ctx.db, "SELECT 1 FROM inventory_items WHERE sku = $1", [sku])) throw new AppError("VALIDATION", `Позиция с артикулом ${sku} уже есть`);
   const id = crypto.randomUUID();
   await ctx.db.query(
-    `INSERT INTO inventory_items (id, tenant_id, sku, title, unit, track_stock, cost_minor, sell_price_minor, for_sale)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    `INSERT INTO inventory_items (id, tenant_id, sku, title, unit, track_stock, cost_minor, sell_price_minor, for_sale, min_qty)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       id,
       ctx.actor.tenantId,
@@ -123,9 +136,16 @@ export async function createItem(ctx: Ctx, input: ItemInput) {
       Number(input.costMinor ?? 0),
       Number(input.sellPriceMinor ?? 0),
       input.forSale ?? false,
+      q(minQty),
     ],
   );
   await audit(ctx, { entity: "inventory_item", entityId: id, action: "inventory.item_created", diff: { sku, title } });
+  // INV-ITEM-02: what is on the shelf right now goes in as the first receipt.
+  const initial = input.initialQty === undefined || input.initialQty === null || input.initialQty === "" ? 0 : Number(String(input.initialQty).replace(",", "."));
+  if (initial > 0 && (input.trackStock ?? true)) {
+    if (!input.branchId) throw new AppError("VALIDATION", "Укажите филиал для начального остатка");
+    await receiveStock(ctx, { branchId: input.branchId, document: "Начальный остаток", lines: [{ itemId: id, qty: initial }] });
+  }
   return presentItem(await loadItem(ctx, id));
 }
 
@@ -133,15 +153,17 @@ export async function updateItem(ctx: Ctx, id: string, input: ItemInput & { acti
   assertWrite(ctx);
   const existing = await loadItem(ctx, id, true);
   const merged = { ...presentItem(existing), ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as ReturnType<typeof presentItem>;
-  const { sku, title } = validateItem(merged);
+  const valid = validateItem(merged);
+  const { title, minQty } = valid;
+  const sku = valid.sku || existing.sku;
   if (existing.track_stock && merged.trackStock === false) {
     const left = await one<{ n: number }>(ctx.db, "SELECT COUNT(*)::int AS n FROM stock_balances WHERE item_id = $1 AND qty <> 0", [id]);
     if (Number(left?.n ?? 0) > 0) throw new AppError("VALIDATION", "Есть остатки — сначала спишите их");
   }
   await ctx.db.query(
-    `UPDATE inventory_items SET sku = $2, title = $3, unit = $4, track_stock = $5, cost_minor = $6, sell_price_minor = $7, for_sale = $8, active = $9
+    `UPDATE inventory_items SET sku = $2, title = $3, unit = $4, track_stock = $5, cost_minor = $6, sell_price_minor = $7, for_sale = $8, active = $9, min_qty = $10
      WHERE id = $1`,
-    [id, sku, title, merged.unit, merged.trackStock, merged.costMinor, merged.sellPriceMinor, merged.forSale, merged.active],
+    [id, sku, title, merged.unit, merged.trackStock, merged.costMinor, merged.sellPriceMinor, merged.forSale, merged.active, q(minQty)],
   );
   await audit(ctx, { entity: "inventory_item", entityId: id, action: "inventory.item_updated", diff: input });
   return presentItem(await loadItem(ctx, id));
