@@ -157,6 +157,8 @@ import {
   updateMessagingSettings,
 } from "@/server/messaging";
 import { handleTelegramUpdate, telegramSecretOk } from "@/server/telegram-bot";
+import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
+import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
 import type { Actor } from "@/server/types";
 import type { AppointmentStatus } from "@/domain/status";
 
@@ -553,6 +555,24 @@ async function handle(request: NextRequest, parts: string[]) {
     );
   }
 
+  if (key === "POST clients/import/preview") return NextResponse.json(await run(async (ctx) => previewImport(ctx, await readJson(request))));
+  if (key === "POST clients/import") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => commitImport(ctx, body)));
+  }
+  if (key === "GET clients/imports") return NextResponse.json(await run((ctx) => listImports(ctx)));
+  if (method === "POST" && parts[0] === "clients" && parts[1] === "imports" && parts[2] && parts[3] === "undo") {
+    return NextResponse.json(await run((ctx) => undoImport(ctx, parts[2])));
+  }
+  if (key === "GET clients/duplicates") return NextResponse.json(await run((ctx) => findDuplicates(ctx)));
+  if (key === "POST clients/merge") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => mergeClients(ctx, String(body.primaryId ?? ""), String(body.secondaryId ?? ""))));
+  }
+  if (key === "POST clients/not-duplicates") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => markNotDuplicates(ctx, Array.isArray(body.ids) ? body.ids.map(String) : [])));
+  }
   if (key === "GET notifications") return NextResponse.json(await run((ctx) => listNotifications(ctx)));
   if (key === "POST notifications/read") {
     const body = await readJson(request);

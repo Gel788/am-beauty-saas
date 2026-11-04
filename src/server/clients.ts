@@ -20,6 +20,9 @@ export type ClientDto = {
   tags: string[];
   visitCount?: number;
   lastVisitAt?: string | null;
+  /** History carried over from the previous system (import). */
+  imported: { visits: number; lastVisit: string | null; revenueMinor: number } | null;
+  mergedIntoId: string | null;
   createdAt: string;
 };
 
@@ -36,6 +39,10 @@ type ClientRow = {
   created_at: Date;
   visit_count?: number;
   last_visit_at?: Date | null;
+  imported_visits?: number;
+  imported_last_visit?: Date | string | null;
+  imported_revenue_minor?: number | string;
+  merged_into_id?: string | null;
 };
 
 function dateOnly(value: Date | string | null): string | null {
@@ -80,6 +87,11 @@ async function hydrate(ctx: Ctx, row: ClientRow): Promise<ClientDto> {
     tags: tags.map((tag) => tag.tag),
     visitCount: row.visit_count !== undefined ? Number(row.visit_count) : undefined,
     lastVisitAt: row.last_visit_at ? new Date(row.last_visit_at).toISOString() : row.last_visit_at,
+    imported:
+      Number(row.imported_visits ?? 0) || row.imported_last_visit || Number(row.imported_revenue_minor ?? 0)
+        ? { visits: Number(row.imported_visits ?? 0), lastVisit: dateOnly(row.imported_last_visit ?? null), revenueMinor: Number(row.imported_revenue_minor ?? 0) }
+        : null,
+    mergedIntoId: row.merged_into_id ?? null,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }

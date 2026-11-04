@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatMoney } from "@/domain/money";
 import { formatPhone } from "@/domain/phone";
@@ -19,6 +20,7 @@ type Client = {
   tags: string[];
   visitCount?: number;
   lastVisitAt?: string | null;
+  imported?: { visits: number; lastVisit: string | null; revenueMinor: number } | null;
 };
 
 export function ClientsView() {
@@ -62,6 +64,8 @@ export function ClientsView() {
         </div>
         <div className="row">
           <div className="search"><input value={query} placeholder="Имя, телефон или почта" aria-label="Поиск клиентов" onChange={(event) => setQuery(event.target.value)} /></div>
+          <Link className="btn" href="/clients/import">Импорт</Link>
+          <Link className="btn" href="/clients/duplicates">Дубли</Link>
           <button className="btn-gradient" onClick={() => { setCreating(true); setSelected(null); setForm({ name: "", phone: "", email: "", notes: "" }); }}>Новый клиент</button>
         </div>
       </div>
@@ -75,7 +79,7 @@ export function ClientsView() {
               <div className="avatar">{initials(client.name)}</div>
               <div style={{ flex: 1 }}>
                 <strong>{client.name}</strong>
-                <span>{client.phones[0] ? formatPhone(client.phones[0].phone) : "без телефона"} · визитов {client.visitCount ?? 0}</span>
+                <span>{client.phones[0] ? formatPhone(client.phones[0].phone) : "без телефона"} · визитов {(client.visitCount ?? 0) + (client.imported?.visits ?? 0)}</span>
               </div>
               {client.balanceMinor > 0 && <span className="badge">{formatMoney(client.balanceMinor)}</span>}
             </button>
@@ -144,6 +148,11 @@ export function ClientsView() {
               {history && (
                 <div>
                   <h3>История</h3>
+                  {selected?.imported && (
+                    <p className="muted" style={{ fontSize: 13 }}>
+                      До переезда: {selected.imported.visits} визитов{selected.imported.lastVisit ? `, последний ${new Date(selected.imported.lastVisit).toLocaleDateString("ru-RU")}` : ""}{selected.imported.revenueMinor ? `, на ${formatMoney(selected.imported.revenueMinor)}` : ""}
+                    </p>
+                  )}
                   {history.visits.length === 0 && <p className="muted">Визитов пока нет</p>}
                   {history.visits.map((visit) => (
                     <div key={visit.id} className="person" style={{ marginBottom: 8 }}>

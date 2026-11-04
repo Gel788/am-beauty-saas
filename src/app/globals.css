@@ -559,3 +559,27 @@ h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spac
 .bk-notice.bk-ok { background: #e7f6ec; color: #1d6b3a; }
 .bk-privacy h2 { font-size: 16px; margin: 18px 0 6px; text-transform: none; letter-spacing: 0; }
 .bk-privacy p, .bk-privacy li { font-size: 14px; line-height: 1.55; color: var(--ink); }
+
+/* Client import (CL-IMPORT-01) and duplicates (CL-MERGE-01) */
+.import-grid { display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; padding-bottom: 8px; }
+.dropzone {
+  display: flex; align-items: center; gap: 10px; padding: 18px; border-radius: 16px; cursor: pointer;
+  border: 1.5px dashed #c9b8e6; background: #faf7fd; color: #514860; font-size: 14px;
+}
+.dropzone input { display: none; }
+.map-table { overflow: auto; border: 1px solid var(--line); border-radius: 14px; max-width: 100%; }
+.map-table table { border-collapse: collapse; font-size: 12.5px; min-width: 100%; }
+.map-table th, .map-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.map-table th { background: #faf7fd; vertical-align: top; }
+.map-table select { margin-top: 4px; font-size: 12px; padding: 3px 4px; border-radius: 8px; border: 1px solid var(--line); max-width: 170px; }
+.map-title { font-weight: 600; color: var(--ink); }
+.map-table td.unused { color: #b7b0c2; }
+.import-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.import-stats > div { background: #faf7fd; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; }
+.import-stats b { font-size: 22px; font-family: var(--font-display); }
+.import-stats span { font-size: 12px; color: #7b7288; }
+.import-stats .bad b { color: #b42318; }
+.dup-group { border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.dup-card { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 12px; cursor: pointer; }
+.dup-card.on { background: #f3ecff; }
+.dup-card small { color: #7b7288; display: block; font-size: 12px; }
