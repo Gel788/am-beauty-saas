@@ -12,6 +12,7 @@ import { isAdminPlus } from "./access";
 import { audit } from "./audit";
 import { many, one } from "./db";
 import { activeIntegration } from "./integrations";
+import { deskUserIds, pushToUsers, staffUserId } from "./push";
 import { smscSend, smsRuSend } from "./providers/sms";
 import { setTelegramTransport, telegramApi, telegramFaked } from "./providers/telegram";
 import type { BranchRow, Ctx } from "./types";
@@ -445,7 +446,7 @@ export async function unbindTelegram(ctx: Ctx, chatId: string, ownBot = false) {
 /** MSG-DESK-01: something the admins must see. In-app, plus Telegram for staff who linked the bot. */
 export async function notifyDesk(
   ctx: Ctx,
-  input: { branchId: string | null; kind: string; title: string; body?: string; entity?: string; entityId?: string | null },
+  input: { branchId: string | null; kind: string; title: string; body?: string; entity?: string; entityId?: string | null; staffId?: string | null },
 ) {
   const id = crypto.randomUUID();
   await ctx.db.query(
@@ -462,6 +463,14 @@ export async function notifyDesk(
     );
     for (const row of staff) await sendToChat(ctx, row.chat_id, row.own_bot, input.body ? `${input.title}\n${input.body}` : input.title);
   }
+  // PWA-PUSH-01: the desk and the visit's master get it on their phones too.
+  const master = await staffUserId(ctx, input.staffId);
+  await pushToUsers(ctx, [...(await deskUserIds(ctx, input.branchId)), ...(master ? [master] : [])], {
+    title: input.title,
+    body: input.body,
+    url: input.entity === "appointment" && input.entityId ? `/journal?open=${input.entityId}` : "/journal",
+    tag: input.entityId ?? id,
+  });
   return id;
 }
 

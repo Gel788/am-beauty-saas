@@ -9,6 +9,7 @@ import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
+import { AppDevice } from "./pwa";
 
 type Me = {
   actor: { name: string; role: string };
@@ -49,7 +50,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const showAi = pathname.startsWith("/journal") && DESK.includes(me?.actor.role ?? "owner");
 
   useEffect(() => {
-    api<Me>("/api/auth/me").then(setMe).catch(() => undefined);
+    api<Me>("/api/auth/me")
+      .then((data) => {
+        setMe(data);
+        // PWA-INSTALL-01: the installed app opens the journal; a master goes to «Мой день».
+        if (data.actor.role === "master" && new URLSearchParams(window.location.search).get("app") === "1") router.replace("/me");
+      })
+      .catch(() => undefined);
     const on = () => setOffline(false);
     const off = () => setOffline(true);
     window.addEventListener("online", on);
@@ -59,7 +66,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
     };
-  }, []);
+  }, [router]);
 
   const branch = me?.branches[0];
   const ownerPhoto = portraitFor(me?.actor.name) ?? "/staff/olga.jpg";
@@ -109,6 +116,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <small>ответа · ≈ 11 часов администратора</small>
             </div>
           )}
+          {me && <AppDevice />}
           {me && (
             <div className="user-row">
               <img className="face" src={ownerPhoto} alt="" />
