@@ -1,5 +1,5 @@
 import { AppError } from "@/domain/errors";
-import { addCalendarDays, formatLocalDate, localDayUtcRange } from "@/domain/time";
+import { addCalendarDays, formatLocalDate, isoWeekday, localDayUtcRange, todayInZone } from "@/domain/time";
 import { isAdminPlus, loadBranch } from "./access";
 import { audit } from "./audit";
 import { many, one } from "./db";
@@ -7,6 +7,7 @@ import { materialsCost } from "./inventory";
 import type { Ctx } from "./types";
 
 type Scheme = "percent" | "fixed_per_service" | "salary" | "hybrid";
+type PeriodUnit = "month" | "biweekly" | "week" | "shift";
 type Base = "service_price" | "paid_amount" | "price_after_discount";
 type PeriodStatus = "draft" | "calculated" | "approved" | "paid" | "locked";
 
@@ -18,10 +19,11 @@ type RuleRow = {
   percent_bps: number;
   fixed_minor: number;
   salary_minor: number;
-  period_unit: "month" | "biweekly" | "week";
+  period_unit: PeriodUnit;
   base: Base;
   include_tips: boolean;
   deduct_materials: boolean;
+  guarantee: boolean;
   valid_from: string;
   valid_to: string | null;
 };
@@ -83,6 +85,52 @@ function daysInMonth(date: string) {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
+function plural(n: number, one: string, few: string, many: string) {
+  const d = n % 10, h = n % 100;
+  return d === 1 && h !== 11 ? one : d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many;
+}
+
+const rub = (minor: number) => `${new Intl.NumberFormat("ru-RU").format(Math.round(minor / 100)).replace(/\u00a0/g, " ")} ₽`;
+
+/**
+ * PAYROLL-SHIFT-01: the days each master worked in the branch. A day counts when the schedule has it as a
+ * working day (weekly template or special hours, minus days off and vacation) and it has already come,
+ * or when the master completed a visit that day even off schedule.
+ */
+async function shiftDays(ctx: Ctx, branchId: string, startsOn: string, endsOn: string, tz: string, from: string, to: string) {
+  const templates = await many<{ staff_id: string; weekday: number }>(
+    ctx.db,
+    "SELECT DISTINCT staff_id, weekday FROM schedule_templates WHERE branch_id = $1 AND kind = 'work'",
+    [branchId],
+  );
+  const exceptions = await many<{ staff_id: string; starts_on: string | Date; ends_on: string | Date; kind: string }>(
+    ctx.db,
+    "SELECT staff_id, starts_on, ends_on, kind FROM schedule_exceptions WHERE branch_id = $1 AND starts_on <= $3 AND ends_on >= $2",
+    [branchId, startsOn, endsOn],
+  );
+  const visits = await many<{ staff_id: string; completed_at: Date }>(
+    ctx.db,
+    "SELECT staff_id, completed_at FROM appointments WHERE branch_id = $1 AND status = 'completed' AND completed_at >= $2 AND completed_at < $3",
+    [branchId, from, to],
+  );
+  const last = [endsOn, todayInZone(tz, ctx.now)].sort()[0];
+  const weekly = new Map<string, Set<number>>();
+  for (const row of templates) weekly.set(row.staff_id, (weekly.get(row.staff_id) ?? new Set()).add(Number(row.weekday)));
+  const result = new Map<string, Set<string>>();
+  const add = (staffId: string, day: string) => result.set(staffId, (result.get(staffId) ?? new Set()).add(day));
+  const staffIds = new Set([...weekly.keys(), ...exceptions.map((row) => row.staff_id)]);
+  for (const staffId of staffIds) {
+    const own = exceptions.filter((row) => row.staff_id === staffId).map((row) => ({ from: toDate(row.starts_on), to: toDate(row.ends_on), kind: row.kind }));
+    for (let day = startsOn; day <= last; day = addCalendarDays(day, 1)) {
+      const hit = own.filter((row) => row.from <= day && row.to >= day);
+      if (hit.some((row) => row.kind === "day_off" || row.kind === "vacation")) continue;
+      if (hit.some((row) => row.kind === "special_hours") || weekly.get(staffId)?.has(isoWeekday(day))) add(staffId, day);
+    }
+  }
+  for (const row of visits) add(row.staff_id, formatLocalDate(new Date(row.completed_at), tz));
+  return new Map([...result].map(([staffId, set]) => [staffId, [...set].sort()]));
+}
+
 // ---------- Rules (PAYROLL-RULE-01) ----------
 
 function presentRule(row: RuleRow) {
@@ -98,6 +146,7 @@ function presentRule(row: RuleRow) {
     base: row.base,
     includeTips: row.include_tips,
     deductMaterials: row.deduct_materials,
+    guarantee: row.guarantee,
     validFrom: toDate(row.valid_from),
     validTo: row.valid_to ? toDate(row.valid_to) : null,
   };
@@ -116,10 +165,11 @@ type RuleInput = {
   percentBps?: number;
   fixedMinor?: number;
   salaryMinor?: number;
-  periodUnit?: "month" | "biweekly" | "week";
+  periodUnit?: PeriodUnit;
   base?: Base;
   includeTips?: boolean;
   deductMaterials?: boolean;
+  guarantee?: boolean;
   validFrom: string;
   validTo?: string | null;
 };
@@ -134,7 +184,10 @@ function validateRule(input: RuleInput) {
   }
   if ((input.scheme === "percent" || input.scheme === "hybrid") && bps === 0) throw new AppError("VALIDATION", "Укажите процент");
   if (input.scheme === "fixed_per_service" && !Number(input.fixedMinor)) throw new AppError("VALIDATION", "Укажите фикс за услугу");
-  if ((input.scheme === "salary" || input.scheme === "hybrid") && !Number(input.salaryMinor)) throw new AppError("VALIDATION", "Укажите оклад");
+  if (input.periodUnit && !["month", "biweekly", "week", "shift"].includes(input.periodUnit)) throw new AppError("VALIDATION", "Неизвестный период оклада");
+  const perShift = input.periodUnit === "shift";
+  if ((input.scheme === "salary" || input.scheme === "hybrid") && !Number(input.salaryMinor)) throw new AppError("VALIDATION", perShift ? "Укажите ставку за выход" : "Укажите оклад");
+  if (input.guarantee && input.scheme !== "hybrid") throw new AppError("VALIDATION", "«Не меньше ставки» бывает только у схемы «ставка + процент»");
   if ((input.scheme === "salary" || input.scheme === "hybrid") && input.serviceId) {
     throw new AppError("VALIDATION", "Оклад задаётся на мастера, а не на услугу");
   }
@@ -165,8 +218,8 @@ export async function createRule(ctx: Ctx, input: RuleInput) {
   }
   const id = crypto.randomUUID();
   await ctx.db.query(
-    `INSERT INTO payroll_rules (id, tenant_id, staff_id, service_id, scheme, percent_bps, fixed_minor, salary_minor, period_unit, base, include_tips, valid_from, valid_to, deduct_materials)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    `INSERT INTO payroll_rules (id, tenant_id, staff_id, service_id, scheme, percent_bps, fixed_minor, salary_minor, period_unit, base, include_tips, valid_from, valid_to, deduct_materials, guarantee)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       id,
       ctx.actor.tenantId,
@@ -182,6 +235,7 @@ export async function createRule(ctx: Ctx, input: RuleInput) {
       from,
       to,
       input.deductMaterials ?? false,
+      input.scheme === "hybrid" ? (input.guarantee ?? false) : false,
     ],
   );
   await audit(ctx, { entity: "payroll_rule", entityId: id, action: "payroll.rule_created", diff: input });
@@ -200,7 +254,7 @@ export async function updateRule(ctx: Ctx, id: string, input: RuleInput) {
   }
   await ctx.db.query(
     `UPDATE payroll_rules SET staff_id = $2, service_id = $3, scheme = $4, percent_bps = $5, fixed_minor = $6, salary_minor = $7,
-       period_unit = $8, base = $9, include_tips = $10, valid_from = $11, valid_to = $12, deduct_materials = $13 WHERE id = $1`,
+       period_unit = $8, base = $9, include_tips = $10, valid_from = $11, valid_to = $12, deduct_materials = $13, guarantee = $14 WHERE id = $1`,
     [
       id,
       merged.staffId ?? null,
@@ -215,6 +269,7 @@ export async function updateRule(ctx: Ctx, id: string, input: RuleInput) {
       from,
       to,
       merged.deductMaterials ?? false,
+      merged.scheme === "hybrid" ? (merged.guarantee ?? false) : false,
     ],
   );
   await audit(ctx, { entity: "payroll_rule", entityId: id, action: "payroll.rule_updated", diff: { before: presentRule(existing), after: merged } });
@@ -409,6 +464,7 @@ export async function getPeriod(ctx: Ctx, id: string) {
 function pickRate(snapshot: Record<string, unknown>) {
   const rate: Record<string, unknown> = { scheme: snapshot.scheme, percentBps: snapshot.percentBps, fixedMinor: snapshot.fixedMinor };
   if (snapshot.materialsMinor !== undefined) rate.materialsMinor = snapshot.materialsMinor;
+  if (snapshot.periodUnit === "shift") Object.assign(rate, { periodUnit: "shift", shifts: snapshot.shifts, shiftDates: snapshot.shiftDates });
   return rate;
 }
 
@@ -548,16 +604,40 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
     });
   }
 
-  // 3. Salary parts, prorated to the period length.
+  // 3. Salary parts: a fixed salary prorated to the period length, or a rate per shift worked.
   const staff = await many<{ id: string; display_name: string }>(
     ctx.db,
     "SELECT s.id, s.display_name FROM staff s JOIN staff_branches sb ON sb.staff_id = s.id AND sb.branch_id = $1 WHERE s.active ORDER BY s.display_name",
     [branch.id],
   );
   const days = daysBetween(period.starts_on, period.ends_on);
+  const shiftsOf = await shiftDays(ctx, branch.id, period.starts_on, period.ends_on, tz, from, to);
   for (const member of staff) {
     const rule = resolveRule(rules, member.id, null, period.ends_on, member.display_name);
     if (!rule || (rule.scheme !== "salary" && rule.scheme !== "hybrid")) continue;
+    if (rule.period_unit === "shift") {
+      // PAYROLL-SHIFT-01: rate × shifts worked, by the schedule plus any day with a completed visit.
+      const worked = shiftsOf.get(member.id) ?? [];
+      const rate = Number(rule.salary_minor);
+      let amount = rate * worked.length;
+      let title = `За выход: ${worked.length} ${plural(worked.length, "смена", "смены", "смен")} × ${rub(rate)}`;
+      if (rule.guarantee) {
+        // PAYROLL-SHIFT-02: percent, but not below the shift rate: only the shortfall is added.
+        const earned = (byStaff.get(member.id) ?? []).filter((line) => line.type === "service").reduce((sum, line) => sum + line.resultMinor, 0);
+        amount = Math.max(0, amount - earned);
+        title = amount > 0 ? `Доплата до ставки за выход: ${worked.length} ${plural(worked.length, "смена", "смены", "смен")} × ${rub(rate)} = ${rub(rate * worked.length)}, процент ${rub(earned)}` : `Процент ${rub(earned)} больше ставки за ${worked.length} ${plural(worked.length, "выход", "выхода", "выходов")} (${rub(rate * worked.length)}), доплаты нет`;
+      }
+      push(member.id, {
+        type: "salary",
+        ruleId: rule.id,
+        title,
+        occurredOn: period.ends_on,
+        baseAmountMinor: rate,
+        rateSnapshot: { scheme: rule.scheme, salaryMinor: rate, periodUnit: "shift", shifts: worked.length, shiftDates: worked, guarantee: rule.guarantee },
+        resultMinor: amount,
+      });
+      continue;
+    }
     const unitDays = rule.period_unit === "week" ? 7 : rule.period_unit === "biweekly" ? 14 : daysInMonth(period.starts_on);
     const amount = Math.round((Number(rule.salary_minor) * Math.min(days, unitDays)) / unitDays);
     push(member.id, {

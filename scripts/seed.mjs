@@ -469,6 +469,19 @@ await task(7, "Счёт на 6 месяцев выставлен, провери
 await task(3, "Сеть просит выгрузку по API в 1С — обсудить", 5);
 await task(0, "Подключить боевую ЮKassa платформы", 7);
 await client.query("INSERT INTO platform_actions (id, tenant_id, actor_email, action, created_at) VALUES ($1, $2, 'demo', 'olga@ambeauty.local: приостановлен', now() - interval '5 days')", [crypto.randomUUID(), demoId(8, "0")]);
+// PAYROLL-SHIFT-*: how masters are paid — per shift, percent, both, or percent with a shift-rate minimum.
+for (const [staffId, scheme, percentBps, salaryMinor, periodUnit, guarantee] of [
+  [staff.alina, "hybrid", 3000, 150000, "shift", false],
+  [staff.marina, "hybrid", 4000, 200000, "shift", true],
+  [staff.denis, "percent", 4000, 0, "month", false],
+  [staff.elena, "salary", 0, 300000, "shift", false],
+]) {
+  await client.query(
+    `INSERT INTO payroll_rules (id, tenant_id, staff_id, scheme, percent_bps, salary_minor, period_unit, guarantee, valid_from)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '2026-01-01')`,
+    [crypto.randomUUID(), tenant, staffId, scheme, percentBps, salaryMinor, periodUnit, guarantee],
+  );
+}
 
 await client.query("COMMIT");
 await client.end();
