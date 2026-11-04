@@ -9,6 +9,7 @@ import { api, type ApiError } from "./api";
 import { initials, useToast } from "./ui";
 import { ClientComms } from "./client-comms";
 import { TechCard } from "./tech-card";
+import { CustomInputs, type Field } from "./resources-fields-settings";
 
 type Client = {
   id: string;
@@ -22,6 +23,7 @@ type Client = {
   visitCount?: number;
   lastVisitAt?: string | null;
   imported?: { visits: number; lastVisit: string | null; revenueMinor: number } | null;
+  custom?: Record<string, unknown>;
 };
 
 export function ClientsView() {
@@ -33,10 +35,24 @@ export function ClientsView() {
   const [form, setForm] = useState({ name: "", phone: "", email: "", notes: "" });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  // CF-*: the salon's client fields, values on the open card, and the list filter.
+  const [fields, setFields] = useState<Field[]>([]);
+  const [custom, setCustom] = useState<Record<string, unknown>>({});
+  const [filter, setFilter] = useState<{ field: string; value: string }>({ field: "", value: "" });
+  useEffect(() => {
+    api<Field[]>("/api/fields?entity=client").then(setFields).catch(() => undefined);
+  }, []);
+  const filterField = fields.find((field) => field.key === filter.field);
 
   async function load(q = query) {
     try {
-      setClients(await api<Client[]>(`/api/clients${q.trim().length >= 2 ? `?q=${encodeURIComponent(q)}` : ""}`));
+      const params = new URLSearchParams();
+      if (q.trim().length >= 2) params.set("q", q);
+      if (filter.field && filter.value) {
+        params.set("field", filter.field);
+        params.set("value", filter.value);
+      }
+      setClients(await api<Client[]>(`/api/clients${params.toString() ? `?${params.toString()}` : ""}`));
       setError("");
     } catch (err) {
       setError((err as ApiError).message);
@@ -47,12 +63,13 @@ export function ClientsView() {
     const timer = window.setTimeout(() => void load(query), query ? 200 : 0);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, filter]);
 
   async function open(client: Client) {
     const full = await api<Client>(`/api/clients/${client.id}`);
     setSelected(full);
     setForm({ name: full.name, phone: full.phones[0]?.phone ?? "", email: full.email ?? "", notes: full.notes });
+    setCustom(full.custom ?? {});
     setHistory(await api(`/api/clients/${client.id}/history`));
   }
 
@@ -65,9 +82,23 @@ export function ClientsView() {
         </div>
         <div className="row">
           <div className="search"><input value={query} placeholder="Имя, телефон или почта" aria-label="Поиск клиентов" onChange={(event) => setQuery(event.target.value)} /></div>
+          {fields.some((field) => field.type === "select" || field.type === "multiselect" || field.type === "bool") && (
+            <div className="row" style={{ gap: 6 }}>
+              <select aria-label="Фильтр по полю" value={filter.field} onChange={(event) => setFilter({ field: event.target.value, value: "" })}>
+                <option value="">Все клиенты</option>
+                {fields.filter((field) => field.type === "select" || field.type === "multiselect" || field.type === "bool").map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+              </select>
+              {filterField && (
+                <select aria-label="Значение" value={filter.value} onChange={(event) => setFilter({ ...filter, value: event.target.value })}>
+                  <option value="">—</option>
+                  {(filterField.type === "bool" ? ["true"] : filterField.options).map((option) => <option key={option} value={option}>{option === "true" ? "да" : option}</option>)}
+                </select>
+              )}
+            </div>
+          )}
           <Link className="btn" href="/clients/import">Импорт</Link>
           <Link className="btn" href="/clients/duplicates">Дубли</Link>
-          <button className="btn-gradient" onClick={() => { setCreating(true); setSelected(null); setForm({ name: "", phone: "", email: "", notes: "" }); }}>Новый клиент</button>
+          <button className="btn-gradient" onClick={() => { setCreating(true); setSelected(null); setCustom({}); setForm({ name: "", phone: "", email: "", notes: "" }); }}>Новый клиент</button>
         </div>
       </div>
       {error && <div className="banner">{error}</div>}
@@ -95,13 +126,13 @@ export function ClientsView() {
                 event.preventDefault();
                 try {
                   if (creating) {
-                    const created = await api<Client>("/api/clients", { method: "POST", body: JSON.stringify(form) });
+                    const created = await api<Client>("/api/clients", { method: "POST", body: JSON.stringify({ ...form, custom }) });
                     toast("Клиент создан");
                     setCreating(false);
                     await load();
                     await open(created);
                   } else if (selected) {
-                    const updated = await api<Client>(`/api/clients/${selected.id}`, { method: "PATCH", body: JSON.stringify({ ...form, version: selected.version }) });
+                    const updated = await api<Client>(`/api/clients/${selected.id}`, { method: "PATCH", body: JSON.stringify({ ...form, custom, version: selected.version }) });
                     toast("Сохранено");
                     setSelected(updated);
                     await load();
@@ -118,6 +149,7 @@ export function ClientsView() {
               <div className="field"><label>Телефон</label><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} required /></div>
               <div className="field"><label>Почта</label><input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div>
               <div className="field"><label>Заметки</label><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></div>
+              <CustomInputs fields={fields} values={custom} onChange={setCustom} />
               <div className="row">
                 <button className="btn-gradient" type="submit">Сохранить</button>
                 {selected && (

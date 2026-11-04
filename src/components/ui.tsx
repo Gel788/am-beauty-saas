@@ -38,14 +38,16 @@ export function Modal({
   title,
   children,
   onClose,
+  wide,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={wide ? "modal modal-wide" : "modal"} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="spread">
           <h2 className="display" style={{ fontSize: 22 }}>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Закрыть">×</button>

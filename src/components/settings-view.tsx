@@ -5,6 +5,7 @@ import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 import { MessagingSettings } from "./messaging-settings";
 import { IntegrationsSettings } from "./integrations-settings";
+import { FieldsSettings, ResourcesSettings } from "./resources-fields-settings";
 
 type Branch = {
   id: string;
@@ -91,6 +92,8 @@ export function SettingsView() {
       <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
       <MessagingSettings branch={branch} role={role} onSaved={setBranch} />
+      {role !== "master" && <ResourcesSettings branchId={branch.id} />}
+      {role !== "master" && <FieldsSettings />}
       <StockSettings branch={branch} onSaved={setBranch} />
     </>
   );

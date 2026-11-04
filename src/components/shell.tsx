@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Banknote, BarChart3, Boxes, Gift, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
@@ -20,6 +20,7 @@ const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: s
   { href: "/journal", label: "Календарь", icon: CalendarDays, roles: [...DESK, "master"] },
   { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard, roles: DESK },
   { href: "/clients", label: "Клиенты", icon: Users, roles: [...DESK, "master"] },
+  { href: "/groups", label: "Группы", icon: UsersRound, roles: [...DESK, "master"] },
   { href: "/journal#ai-panel", label: "AI-ассистент", icon: Sparkles, badge: "3", roles: DESK },
   { href: "/services", label: "Услуги", icon: Scissors, roles: DESK },
   { href: "/staff", label: "Мастера", icon: UserRound, roles: [...DESK, "master"], masterLabel: "Мой график" },

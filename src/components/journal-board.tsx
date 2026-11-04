@@ -30,7 +30,13 @@ type Appt = {
   priceMinor: number;
   paidMinor: number;
   forceOverlap: boolean;
+  resourceIds?: string[];
+  /** CF-JOURNAL-01: the one custom field shown on the block. */
+  note?: string | null;
 };
+
+type ResourceColumn = { id: string; title: string; kind: string; color: string; capacity: number };
+type GroupBlock = { id: string; title: string; staffId: string | null; resourceId: string | null; startMin: number; endMin: number; enrolled: number; capacity: number; status: string };
 
 type Column = {
   id: string;
@@ -49,6 +55,8 @@ type Journal = {
   dayEndMin: number;
   staff: Column[];
   appointments: Appt[];
+  resources?: ResourceColumn[];
+  groups?: GroupBlock[];
   stats: { expectedRevenueMinor: number; loadPercent: number; appointmentCount: number; onlineCount: number; newClients: number };
 };
 
@@ -81,6 +89,8 @@ export function JournalBoard() {
   const [seed, setSeed] = useState<DrawerSeed | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [view, setView] = useState<"day" | "week" | "month">("day");
+  // RES-VIEW-01: columns by master or by room/device.
+  const [columnsBy, setColumnsBy] = useState<"staff" | "resource">("staff");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [found, setFound] = useState<{ id: string; clientName: string; staffName: string; startsAt: string; date: string }[]>([]);
@@ -343,6 +353,12 @@ export function JournalBoard() {
             <button className={view === "week" ? "on" : ""} onClick={() => setView("week")} type="button">Неделя</button>
             <button className={view === "month" ? "on" : ""} onClick={() => setView("month")} type="button">Месяц</button>
           </div>
+          {view === "day" && (journal?.resources?.length ?? 0) > 0 && (
+            <div className="segment">
+              <button className={columnsBy === "staff" ? "on" : ""} onClick={() => setColumnsBy("staff")} type="button">Мастера</button>
+              <button className={columnsBy === "resource" ? "on" : ""} onClick={() => setColumnsBy("resource")} type="button">Кабинеты</button>
+            </div>
+          )}
           <div style={{ position: "relative" }}>
             <button className="icon-circle" type="button" aria-label="Поиск записей" onClick={() => { setSearchOpen((value) => !value); window.setTimeout(() => searchRef.current?.focus(), 0); }}>
               <Search size={16} />
@@ -383,6 +399,8 @@ export function JournalBoard() {
           onOpenDay={(day) => { setView("day"); go(day); }}
           onOpenAppointment={(id, day) => { setView("day"); go(day); setSeed({ id, staffId: "", startMin: 0, date: day }); }}
         />
+      ) : columnsBy === "resource" && journal && (journal.resources?.length ?? 0) > 0 ? (
+        <ResourceGrid journal={journal} hours={hours} onOpen={(id) => setSeed({ id, staffId: "", startMin: 0, date })} onOpenGroup={(id) => router.push(`/groups?open=${id}`)} staffName={(id) => journal.staff.find((item) => item.id === id)?.name ?? ""} />
       ) : (
         <div className="cal-scroll" ref={columnsRef}>
           {loading && !journal && <div className="skeleton" />}
@@ -468,6 +486,7 @@ export function JournalBoard() {
                             {blockPx >= 72 && <span className="when">{hh(start)}–{hh(end)}</span>}
                             <b>{appt.clientName || "Без имени"}</b>
                             {serviceTitle && <small>{serviceTitle}</small>}
+                            {appt.note && blockPx >= 64 && <span className="note">{appt.note}</span>}
                           </>
                         )}
                         {appt.source === "online" && <span className="ai-badge" title="Онлайн-запись">Онлайн</span>}
@@ -475,6 +494,18 @@ export function JournalBoard() {
                       </button>
                     );
                   })}
+                  {(journal.groups ?? []).filter((group) => group.staffId === staff.id).map((group) => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      className="group-ghost"
+                      style={{ top: `${((group.startMin - dayStart) / span) * 100}%`, height: `calc(${((group.endMin - group.startMin) / span) * 100}% - 3px)` }}
+                      onClick={(event) => { event.stopPropagation(); router.push(`/groups?open=${group.id}`); }}
+                    >
+                      <b>{group.title}</b>
+                      Группа · {group.enrolled}/{group.capacity}
+                    </button>
+                  ))}
                   {drag?.active && drag.previewStaff === staff.id && !journal.appointments.some((appt) => appt.id === drag.id && appt.staffId === staff.id) && (
                     <div className={`appt preview ${drag.invalid ? "bad" : ""}`} style={{ top: `${((drag.previewStart - dayStart) / span) * 100}%`, height: `calc(${((drag.previewEnd - drag.previewStart) / span) * 100}% - 3px)`, background: "#efe7ff" }} />
                   )}
@@ -501,6 +532,80 @@ export function JournalBoard() {
         />
       )}
     </>
+  );
+}
+
+/** RES-VIEW-01: the same day by rooms and devices. Visits open the drawer; groups open their page. */
+function ResourceGrid({ journal, hours, onOpen, onOpenGroup, staffName }: { journal: Journal; hours: number[]; onOpen: (id: string) => void; onOpenGroup: (id: string) => void; staffName: (id: string) => string }) {
+  const resources = journal.resources ?? [];
+  const dayStart = journal.dayStartMin;
+  const span = Math.max(30, journal.dayEndMin - dayStart);
+  const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+  return (
+    <div className="cal-scroll">
+      <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${resources.length}, minmax(0, 1fr))` }}>
+        <div />
+        {resources.map((resource) => (
+          <div className="master-head" key={resource.id}>
+            <span className="avatar" style={{ background: resource.color }}>{resource.title.slice(0, 1)}</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <strong>{resource.title}</strong>
+              <div className="muted" style={{ fontSize: 11.5 }}>{resource.kind === "room" ? "кабинет" : resource.kind === "equipment" ? "аппарат" : "ресурс"}{resource.capacity > 1 ? ` · ${resource.capacity} места` : ""}</div>
+            </div>
+          </div>
+        ))}
+        <div className="gutter">
+          {hours.map((minute) => (
+            <div key={minute} className="hour-label" style={{ top: `${((minute - dayStart) / span) * 100}%` }}>{hh(minute)}</div>
+          ))}
+        </div>
+        {resources.map((resource) => {
+          const visits = journal.appointments.filter((appt) => appt.status !== "cancelled" && appt.resourceIds?.includes(resource.id));
+          return (
+            <div key={resource.id} className="day-col" data-resource={resource.id}>
+              {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: `${((minute - dayStart) / span) * 100}%` }} />)}
+              {visits.map((appt) => {
+                // Two visits at once in a room for two: split the column.
+                const lanes = resource.capacity > 1 ? visits.filter((other) => other.startMin < appt.endMin && other.endMin > appt.startMin) : [appt];
+                const lane = Math.max(0, lanes.indexOf(appt));
+                const width = 100 / Math.max(1, lanes.length);
+                return (
+                  <button
+                    key={appt.id}
+                    className="appt"
+                    style={{
+                      top: `${((appt.startMin - dayStart) / span) * 100}%`,
+                      height: `calc(${((appt.endMin - appt.startMin) / span) * 100}% - 3px)`,
+                      left: `calc(${lane * width}% + 3px)`,
+                      width: `calc(${width}% - 6px)`,
+                      right: "auto",
+                      background: `linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)), ${appt.color}`,
+                    }}
+                    onClick={() => onOpen(appt.id)}
+                  >
+                    <span className="when">{hh(appt.startMin)}–{hh(appt.endMin)}</span>
+                    <b>{appt.clientName || "Без имени"}</b>
+                    <small>{staffName(appt.staffId)} · {appt.services[0]?.title ?? ""}</small>
+                  </button>
+                );
+              })}
+              {(journal.groups ?? []).filter((group) => group.resourceId === resource.id).map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  className="group-ghost"
+                  style={{ top: `${((group.startMin - dayStart) / span) * 100}%`, height: `calc(${((group.endMin - group.startMin) / span) * 100}% - 3px)` }}
+                  onClick={() => onOpenGroup(group.id)}
+                >
+                  <b>{group.title}</b>
+                  Группа · {group.enrolled}/{group.capacity}
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

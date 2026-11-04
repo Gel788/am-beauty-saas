@@ -75,7 +75,9 @@ Online: only show_in_online.
 
 ## 5. Чеклист
 
-- [ ] CRUD definitions  
-- [ ] Validation on Save  
-- [ ] Online subset  
-- [ ] Filter/export  
+- [x] CRUD definitions  
+- [x] Validation on Save  
+- [x] Online subset  
+- [x] Filter/export
+
+**Реализация:** `src/server/custom-fields.ts` (до 30 полей на сущность, до 3 в онлайн-записи, одно поле на блоке журнала, тип нельзя менять после использования), значения в `clients.custom` / `appointments.custom` (jsonb), фильтр в списке клиентов, колонки `cf_<key>` в CSV-выгрузке журнала, объединение при слиянии дублей.

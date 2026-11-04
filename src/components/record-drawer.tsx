@@ -8,6 +8,7 @@ import { zonedDateTimeToUtc } from "@/domain/time";
 import { api, type ApiError } from "./api";
 import { PaymentRow, type PaymentItem } from "./payment-actions";
 import { PayLinkBlock } from "./pay-link";
+import { CustomInputs, type Field } from "./resources-fields-settings";
 import { Modal, useToast } from "./ui";
 
 type Line = { serviceId: string; title: string; durationMin: number; priceMinor: number };
@@ -91,6 +92,13 @@ export function RecordDrawer({
   const [externalReceipts, setExternalReceipts] = useState(false);
   const [receiptNo, setReceiptNo] = useState("");
   const [terminalRef, setTerminalRef] = useState("");
+  // RES-LINK-01: rooms/devices held by the visit, options for the chosen services, and the desk's override.
+  const [heldResources, setHeldResources] = useState<{ id: string; title: string; kind: string }[]>([]);
+  const [resourceOptions, setResourceOptions] = useState<{ id: string; title: string; kind: string; free: boolean }[]>([]);
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  // CF-VAL-01: the salon's own visit fields.
+  const [fields, setFields] = useState<Field[]>([]);
+  const [custom, setCustom] = useState<Record<string, unknown>>({});
   const goodsMinor = cart.reduce((sum, line) => sum + Math.round(line.priceMinor * line.qty), 0);
 
   const mark = () => setDirty(true);
@@ -110,7 +118,22 @@ export function RecordDrawer({
   useEffect(() => {
     api<{ services: CatalogService[] }>("/api/catalog").then((data) => setServices(data.services)).catch(() => undefined);
     api<Staff[]>("/api/staff").then(setStaff).catch(() => undefined);
+    api<Field[]>("/api/fields?entity=appointment").then(setFields).catch(() => undefined);
   }, []);
+
+  const serviceKey = lines.map((line) => line.serviceId).join(",");
+  useEffect(() => {
+    if (!serviceKey) {
+      setResourceOptions([]);
+      return;
+    }
+    const startsAt = zonedDateTimeToUtc(seed.date, startMin, timezone).toISOString();
+    const query = new URLSearchParams({ branchId, serviceIds: serviceKey, startsAt, durationMin: String(duration), ...(seed.id ? { appointmentId: seed.id } : {}) });
+    const timer = window.setTimeout(() => {
+      api<{ id: string; title: string; kind: string; free: boolean }[]>(`/api/resources/options?${query.toString()}`).then(setResourceOptions).catch(() => setResourceOptions([]));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [serviceKey, startMin, duration, seed.date, seed.id, branchId, timezone]);
 
   useEffect(() => {
     if (!seed.id) {
@@ -131,6 +154,8 @@ export function RecordDrawer({
       comment: string;
       services: Line[];
       paidMinor: number;
+      resources: { id: string; title: string; kind: string }[];
+      custom: Record<string, unknown>;
       promo: { code: string; discountMinor: number } | null;
       source: string;
       actions: { id: string; label: string; enabled: boolean; reason: string | null }[];
@@ -151,6 +176,9 @@ export function RecordDrawer({
       setStartMin(hour * 60 + minute);
       setLines(row.services.map((line) => ({ serviceId: line.serviceId, title: line.title, durationMin: line.durationMin, priceMinor: line.priceMinor })));
       setComment(row.comment);
+      setHeldResources(row.resources ?? []);
+      setPicked({});
+      setCustom(row.custom ?? {});
       setPaidMinor(row.paidMinor);
       setPromo(row.promo);
       setLoyalty(null);
@@ -207,6 +235,8 @@ export function RecordDrawer({
         services: lines.map((line) => ({ serviceId: line.serviceId, durationMin: line.durationMin })),
         comment,
         acknowledgeSoft: false,
+        resourceIds: Object.values(picked).filter(Boolean),
+        custom,
         ...extra,
       };
       if (seed.id) {
@@ -233,6 +263,8 @@ export function RecordDrawer({
       } else if (err.code === "CONFLICT_SLOT") {
         const reason = window.prompt("Время пересекается. Причина, чтобы записать поверх (пусто — отмена)");
         if (reason) return save({ ...extra, forceOverlap: true, overlapReason: reason, acknowledgeSoft: true });
+      } else if (err.code === "CONFLICT_RESOURCE") {
+        toast(`${err.message}. Выберите другое время или кабинет`, "error");
       } else if (err.code === "STALE") {
         toast("Запись изменена. Обновите карточку", "error");
       } else if (err.details?.existingClientId) {
@@ -473,6 +505,25 @@ export function RecordDrawer({
                 ))}
               </div>
             </div>
+            {resourceOptions.length > 0 && (
+              <div className="field">
+                <label>Кабинет и оборудование</label>
+                <div className="form-grid">
+                  {[...new Set(resourceOptions.map((option) => option.kind))].map((kind) => {
+                    const held = heldResources.find((row) => row.kind === kind);
+                    return (
+                      <select key={kind} aria-label="Кабинет" value={picked[kind] ?? ""} onChange={(event) => { setPicked({ ...picked, [kind]: event.target.value }); mark(); }}>
+                        <option value="">{held ? `${held.title} (сейчас)` : "Подобрать свободный"}</option>
+                        {resourceOptions.filter((option) => option.kind === kind).map((option) => (
+                          <option key={option.id} value={option.id} disabled={!option.free && option.id !== held?.id}>{option.title}{option.free ? "" : " — занят"}</option>
+                        ))}
+                      </select>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <CustomInputs fields={fields} values={custom} onChange={(next) => { setCustom(next); mark(); }} />
             <div className="field"><label>Комментарий</label><textarea rows={3} value={comment} onChange={(event) => { setComment(event.target.value); mark(); }} /></div>
             {seed.id && (
               <div className="chips">

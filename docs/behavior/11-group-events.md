@@ -111,9 +111,11 @@
 
 ## 6. Чеклист
 
-- [ ] CRUD + capacity/waitlist  
-- [ ] Pay per seat  
-- [ ] Online enroll + hold  
-- [ ] Reminders  
+- [x] CRUD + capacity/waitlist  
+- [x] Pay per seat  
+- [x] Online enroll (место берётся под блокировкой строки занятия, без отдельного hold)  
+- [x] Reminders  
 - [ ] Payroll hook  
-- [ ] Analytics fill rate  
+- [x] Analytics fill rate
+
+**Реализация:** `src/server/groups.ts`, страница «Группы» (`src/components/groups-view.tsx`), блок в виджете онлайн-записи с листом ожидания, серия на N недель (GRP-RECUR-01), призрачный блок занятия в колонке ведущего в журнале. Не сделано: начисление ведущему в зарплату (GRP-COMPLETE-01 payroll hook) — войдёт в этап зарплат.

@@ -16,7 +16,10 @@ type Branch = {
 };
 type Service = { id: string; title: string; categoryId: string | null; durationMin: number; priceMinor: number; staffIds: string[] };
 type Staff = { id: string; name: string; color: string; specialties: string };
-type Catalog = { branch: Branch; categories: { id: string; title: string }[]; services: Service[]; staff: Staff[] };
+type OnlineField = { key: string; entity: "client" | "appointment"; label: string; type: string; options: string[]; required: boolean };
+type GroupEvent = { id: string; title: string; description: string; staffName: string | null; startsAt: string; endsAt: string; date: string; priceMinor: number; freeSeats: number; capacity: number };
+type Catalog = { branch: Branch; categories: { id: string; title: string }[]; services: Service[]; staff: Staff[]; fields?: OnlineField[]; groups?: GroupEvent[] };
+type GroupResult = { status: "enrolled" | "waitlisted"; title: string; startsAt: string };
 type Slot = { startsAt: string; time: string; staffIds: string[] };
 type Day = { date: string; slots: Slot[] };
 type Hold = { holdId: string; expiresAt: string; staffId: string; staffName: string; serviceTitle: string; priceMinor: number; startsAt: string; endsAt: string };
@@ -32,7 +35,7 @@ type Booking = {
   cancelUntil: string;
   telegramUrl: string | null;
 };
-type Failure = Error & { code?: string; details?: { reason?: string } | null };
+type Failure = Error & { code?: string; details?: { reason?: string; full?: boolean; field?: string } | null };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
@@ -87,6 +90,10 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [form, setForm] = useState({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false });
   const idempotencyKey = useRef<string>("");
+  const [custom, setCustom] = useState<Record<string, unknown>>({});
+  const [group, setGroup] = useState<GroupEvent | null>(null);
+  const [groupFull, setGroupFull] = useState(false);
+  const [groupResult, setGroupResult] = useState<GroupResult | null>(null);
 
   const [ratings, setRatings] = useState<Record<string, { rating: number; count: number }>>({});
   useEffect(() => {
@@ -182,7 +189,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
     try {
       const result = await call<Booking>(`${base}/bookings`, {
         method: "POST",
-        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, consent: form.consent, marketing: form.marketing, idempotencyKey: idempotencyKey.current }),
+        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, consent: form.consent, marketing: form.marketing, custom, idempotencyKey: idempotencyKey.current }),
       });
       setBooking(result);
       setHold(null);
@@ -200,6 +207,38 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
     } finally {
       setBusy(false);
     }
+  }
+
+  async function enrollGroup(waitlist: boolean) {
+    if (!group || form.website) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await call<GroupResult>(`${base}/groups/${group.id}/enroll`, {
+        method: "POST",
+        body: JSON.stringify({ name: form.name, phone: form.phone, consent: form.consent, marketing: form.marketing, waitlist }),
+      });
+      setGroupResult(result);
+      setStep(4);
+      setGroupFull(false);
+    } catch (error) {
+      const failure = error as Failure;
+      if (failure.details?.full) setGroupFull(true);
+      setNotice(failure.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resetAll() {
+    setBooking(null);
+    setService(null);
+    setGroup(null);
+    setGroupResult(null);
+    setGroupFull(false);
+    setCustom({});
+    setForm({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false });
+    setStep(1);
   }
 
   const grouped = useMemo(() => {
@@ -242,7 +281,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
           </div>
         </header>
 
-        {step < 4 && (
+        {step < 4 && !group && (
           <ol className="bk-steps" aria-label="Шаги записи">
             {["Услуга", "Мастер и время", "Контакты"].map((label, index) => (
               <li key={label} className={step === index + 1 ? "on" : step > index + 1 ? "done" : ""}>
@@ -268,6 +307,53 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
                 ))}
               </div>
             ))}
+            {!!catalog.groups?.length && (
+              <div className="bk-group">
+                <h2>Групповые занятия</h2>
+                {catalog.groups.map((item) => (
+                  <button key={item.id} className="bk-service" onClick={() => { setGroup(item); setGroupFull(item.freeSeats === 0); setNotice(null); setStep(3); }}>
+                    <span className="bk-service-title">{item.title}<small className="bk-muted"> · {formatWhen(item.startsAt, tz)}{item.staffName ? ` · ${item.staffName}` : ""}</small></span>
+                    <span className="bk-service-meta">{item.freeSeats ? `${item.freeSeats} из ${item.capacity} мест` : "мест нет"} · {formatMoney(item.priceMinor, branch.currency)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {step === 3 && group && !groupResult && (
+          <section>
+            <div className="bk-picked">
+              <span>{group.title} · {formatWhen(group.startsAt, tz)} · {formatMoney(group.priceMinor, branch.currency)}</span>
+              <button className="bk-link" onClick={() => { setGroup(null); setNotice(null); setStep(1); }}>Изменить</button>
+            </div>
+            {group.description && <p className="bk-muted">{group.description}</p>}
+            <form className="bk-form" onSubmit={(event) => { event.preventDefault(); void enrollGroup(groupFull); }}>
+              <label>Имя<input required autoComplete="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+              <label>Телефон<input required type="tel" autoComplete="tel" placeholder="+7 900 000-00-00" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+              <label className="bk-consent">
+                <input type="checkbox" required checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} />
+                <span>Согласен(на) на обработку персональных данных по <a href={`/b/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(branchSlug)}/privacy`} target="_blank" rel="noreferrer">политике</a> салона</span>
+              </label>
+              <label className="bk-consent">
+                <input type="checkbox" checked={form.marketing} onChange={(event) => setForm({ ...form, marketing: event.target.checked })} />
+                <span>Хочу получать акции и новости салона</span>
+              </label>
+              <input className="bk-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
+              {groupFull && <p className="bk-muted">Свободных мест нет. Встаньте в лист ожидания: если место освободится, мы напишем.</p>}
+              <button className="bk-primary" type="submit" disabled={busy}>{busy ? "Записываем…" : groupFull ? "Встать в лист ожидания" : "Записаться на занятие"}</button>
+            </form>
+          </section>
+        )}
+
+        {groupResult && (
+          <section className="bk-done">
+            <div className="bk-check">✓</div>
+            <h2>{groupResult.status === "enrolled" ? "Вы записаны" : "Вы в листе ожидания"}</h2>
+            <p className="bk-when">{formatWhen(groupResult.startsAt, tz)}</p>
+            <p>{groupResult.title}</p>
+            {groupResult.status === "waitlisted" && <p className="bk-muted">Если место освободится, мы пришлём сообщение.</p>}
+            <button className="bk-link" onClick={resetAll}>Записаться ещё</button>
           </section>
         )}
 
@@ -328,6 +414,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
               <label>Имя<input required autoComplete="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
               <label>Телефон<input required type="tel" autoComplete="tel" placeholder="+7 900 000-00-00" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               <label>Комментарий<textarea rows={2} value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} /></label>
+              {(catalog.fields ?? []).map((field) => <WidgetField key={field.key} field={field} value={custom[field.key]} onChange={(value) => setCustom({ ...custom, [field.key]: value })} />)}
               <label>Промокод<input autoComplete="off" value={form.promo} onChange={(event) => setForm({ ...form, promo: event.target.value.toUpperCase() })} /></label>
               <label className="bk-consent">
                 <input type="checkbox" required checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} />
@@ -360,13 +447,59 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
                 Получать напоминания в Telegram
               </a>
             )}
-            <button className="bk-link" onClick={() => { setBooking(null); setService(null); setForm({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false }); setStep(1); }}>
+            <button className="bk-link" onClick={resetAll}>
               Записаться ещё
             </button>
           </section>
         )}
       </div>
     </div>
+  );
+}
+
+/** CF-ONLINE-01: the salon's own questions (at most three), rendered in the widget's style. */
+function WidgetField({ field, value, onChange }: { field: OnlineField; value: unknown; onChange: (value: unknown) => void }) {
+  const title = `${field.label}${field.required ? "" : " (необязательно)"}`;
+  if (field.type === "bool") {
+    return (
+      <label className="bk-consent">
+        <input type="checkbox" required={field.required} checked={value === true} onChange={(event) => onChange(event.target.checked)} />
+        <span>{field.label}</span>
+      </label>
+    );
+  }
+  if (field.type === "select") {
+    return (
+      <label>{title}
+        <select required={field.required} value={String(value ?? "")} onChange={(event) => onChange(event.target.value || undefined)}>
+          <option value="">Выберите</option>
+          {field.options.map((option) => <option key={option}>{option}</option>)}
+        </select>
+      </label>
+    );
+  }
+  if (field.type === "multiselect") {
+    const list = Array.isArray(value) ? (value as string[]) : [];
+    return (
+      <div className="bk-field">
+        <span>{title}</span>
+        <div className="bk-chips">
+          {field.options.map((option) => (
+            <button key={option} type="button" className={list.includes(option) ? "on" : ""} onClick={() => onChange(list.includes(option) ? list.filter((item) => item !== option) : [...list, option])}>{option}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  const type = field.type === "number" ? "number" : field.type === "date" ? "date" : "text";
+  return (
+    <label>{title}
+      {field.type === "textarea" ? (
+        <textarea rows={2} required={field.required} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
+      ) : (
+        <input type={type} required={field.required} value={String(value ?? "")} onChange={(event) => onChange(field.type === "number" ? (event.target.value === "" ? undefined : Number(event.target.value)) : event.target.value)} />
+      )}
+    </label>
   );
 }
 

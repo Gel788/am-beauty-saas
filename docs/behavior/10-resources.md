@@ -73,7 +73,9 @@ Conflict checks: server-side на любой Save/drag.
 
 ## 5. Чеклист
 
-- [ ] Conflict hard capacity  
-- [ ] Auto-assign + manual override  
-- [ ] Resource timetable view + drag  
-- [ ] Service link  
+- [x] Conflict hard capacity  
+- [x] Auto-assign + manual override  
+- [ ] Resource timetable view + drag (вид «Кабинеты» есть, перетаскивание пока только в виде «Мастера»)  
+- [x] Service link
+
+**Реализация:** `db/migrations/016_resources_groups_fields.sql`, `src/server/resources.ts` (planResources: свободный ресурс каждого нужного вида, CONFLICT_RESOURCE → 409, RESOURCE_HOURS — предупреждение), онлайн-слоты учитывают кабинеты, групповое занятие занимает зал целиком. UI: «Настройки → Кабинеты и аппараты», выбор кабинета в карточке записи, переключатель «Мастера | Кабинеты» в журнале. Тесты: `tests/tz10-12.test.ts`.

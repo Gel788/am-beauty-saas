@@ -231,6 +231,62 @@ if (paidAppointment) {
 await seedRetention(client, { tenant, branch, staff, serviceIds, services, clientIds, adminId: users.admin, today });
 await seedTechCard(client, { tenant, staff, clientIds, userIds: users });
 
+// TZ §10–12 demo: rooms linked to services, two custom fields, group classes with a waitlist.
+const rooms = {
+  massage: [crypto.randomUUID(), "Массажный кабинет", "room", 1, "#d9f3e4", ["massage", "spa", "back"]],
+  brows: [crypto.randomUUID(), "Кабинет бровей и ресниц", "room", 1, "#f8e7c4", ["brows", "lashes"]],
+  hall: [crypto.randomUUID(), "Зал для мастер-классов", "room", 1, "#ffe3ef", []],
+};
+let roomPos = 0;
+for (const [id, title, kind, capacity, color, serviceKeys] of Object.values(rooms)) {
+  await client.query(
+    "INSERT INTO resources (id, tenant_id, branch_id, kind, title, color, capacity, open_min, close_min, position) VALUES ($1,$2,$3,$4,$5,$6,$7,540,1260,$8)",
+    [id, tenant, branch, kind, title, color, capacity, roomPos++],
+  );
+  for (const key of serviceKeys) {
+    await client.query("INSERT INTO service_resources (tenant_id, service_id, resource_id) VALUES ($1,$2,$3)", [tenant, serviceIds[key], id]);
+  }
+}
+// Today's appointments for linked services already sit in their rooms.
+await client.query(
+  `INSERT INTO appointment_resources (tenant_id, appointment_id, resource_id)
+   SELECT a.tenant_id, a.id, sr.resource_id FROM appointments a
+   JOIN appointment_services s ON s.appointment_id = a.id
+   JOIN service_resources sr ON sr.service_id = s.service_id
+   WHERE a.tenant_id = $1 ON CONFLICT DO NOTHING`,
+  [tenant],
+);
+await client.query(
+  `INSERT INTO custom_fields (id, tenant_id, entity, key, label, type, options, required, show_in_online, show_in_journal, position) VALUES
+   ($1,$4,'client','skin_type','Тип кожи','select','{Сухая,Нормальная,Жирная,Комбинированная}',false,true,false,0),
+   ($2,$4,'client','allergies','Аллергии','text','{}',false,false,false,1),
+   ($3,$4,'appointment','occasion','Повод','select','{Свадьба,Фотосессия,Праздник}',false,false,true,0)`,
+  [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), tenant],
+);
+await client.query("UPDATE clients SET custom = '{\"skin_type\":\"Сухая\",\"allergies\":\"лидокаин\"}' WHERE id = $1", [clientIds["Анна Смирнова"]]);
+function dayAt(offset, hours, minutes) {
+  return new Date(at(hours, minutes).getTime() + offset * 86400000);
+}
+const groupPlan = [
+  ["Мастер-класс: уход за руками дома", "Покажем базовый уход, подбор масел и кремов. Материалы включены.", staff.marina, 0, 19, 0, 90, 8, 150000, ["Анна Смирнова", "Ксения Орлова", "Юлия Морозова"], []],
+  ["Йога для лица", "Упражнения для тонуса и лимфодренажа. Возьмите удобную одежду.", staff.elena, 2, 19, 0, 60, 4, 120000, ["Мария Кузнецова", "Полина Зайцева", "Дарья Фёдорова", "Алёна Егорова"], ["Ольга Белова"]],
+  ["Макияж на каждый день", "Мини-группа, 3 часа практики на себе.", staff.marina, 5, 12, 0, 180, 6, 350000, ["Виктория Павлова"], []],
+];
+for (const [title, description, host, offset, hours, minutes, duration, capacity, price, enrolled, waitlisted] of groupPlan) {
+  const id = crypto.randomUUID();
+  const starts = dayAt(offset, hours, minutes);
+  await client.query(
+    `INSERT INTO group_events (id, tenant_id, branch_id, title, description, staff_id, resource_id, starts_at, ends_at, capacity, price_minor, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [id, tenant, branch, title, description, host, rooms.hall[0], starts.toISOString(), new Date(starts.getTime() + duration * 60000).toISOString(), capacity, price, users.admin],
+  );
+  for (const [list, status] of [[enrolled, "enrolled"], [waitlisted, "waitlisted"]]) {
+    for (const name of list) {
+      await client.query("INSERT INTO group_participants (id, tenant_id, event_id, client_id, status) VALUES ($1,$2,$3,$4,$5)", [crypto.randomUUID(), tenant, id, clientIds[name], status]);
+    }
+  }
+}
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);
