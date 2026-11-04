@@ -17,7 +17,7 @@ describe("access", () => {
     });
     expect(created.actor.role).toBe("owner");
     const again = await login(email, "ambeauty");
-    expect(again.actor.tenantId).toBe(created.actor.tenantId);
+    expect(again.actor?.tenantId).toBe(created.actor.tenantId);
     await expect(login(email, "wrong-pass")).rejects.toMatchObject({ code: "VALIDATION" });
   });
 

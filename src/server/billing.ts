@@ -1,9 +1,10 @@
 import { AppError } from "@/domain/errors";
 import { PERIODS, PLANS, accessState, invoiceAmount, isReadOnly, limitsOf, planById, type PlanId, type TenantPlan } from "@/domain/plans";
 import { audit } from "./audit";
+import { isPlatformAdmin } from "./platform-admin";
 import { many, one, pool, poolOne, withSession } from "./db";
 import { yookassaProvider } from "./providers/yookassa";
-import type { Actor, Ctx } from "./types";
+import type { Actor, Ctx, PlatformActor } from "./types";
 
 type TenantRow = { plan: TenantPlan; trial_ends_at: Date; paid_until: Date | null; suspended_at: Date | null; suspended_reason: string };
 
@@ -172,16 +173,13 @@ export async function handleBillingWebhook(body: unknown, headers: Headers) {
 
 // ------------------------------------------------------------------ PLAT-SUPER-01
 
-export function isPlatformAdmin(actor: Actor) {
-  const list = (process.env.PLATFORM_ADMIN_EMAILS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
-  return list.includes(actor.email.toLowerCase());
-}
+export { isPlatformAdmin };
 
-function assertPlatform(actor: Actor) {
+export function assertPlatform(actor: Pick<PlatformActor, "email">) {
   if (!isPlatformAdmin(actor)) throw new AppError("FORBIDDEN", "Раздел для команды платформы");
 }
 
-export async function platformTenants(actor: Actor, now = new Date()) {
+export async function platformTenants(actor: PlatformActor, now = new Date()) {
   assertPlatform(actor);
   const { rows } = await pool.query("SELECT * FROM platform_tenants()");
   return rows.map((row) => {
@@ -207,7 +205,7 @@ export async function platformTenants(actor: Actor, now = new Date()) {
   });
 }
 
-export async function platformUpdateTenant(actor: Actor, id: string, input: { plan?: unknown; extendDays?: unknown; suspend?: unknown; reason?: unknown }, now = new Date()) {
+export async function platformUpdateTenant(actor: PlatformActor, id: string, input: { plan?: unknown; extendDays?: unknown; suspend?: unknown; reason?: unknown }, now = new Date()) {
   assertPlatform(actor);
   if (!/^[0-9a-f-]{36}$/.test(id)) throw new AppError("NOT_FOUND", "Салон не найден");
   const plan = input.plan === undefined ? null : String(input.plan);
@@ -227,5 +225,7 @@ export async function platformUpdateTenant(actor: Actor, id: string, input: { pl
   const suspend = input.suspend === undefined ? null : input.suspend === true;
   await pool.query("SELECT platform_update_tenant($1, $2, $3, $4, $5, $6)", [id, plan, trialEnds, paidUntil, suspend, input.reason ? String(input.reason).slice(0, 200) : null]);
   console.info("platform", JSON.stringify({ by: actor.email, tenant: id, plan, days, suspend }));
+  const what = [plan && plan !== current.plan ? `тариф → ${planById(plan)?.title ?? "Пробный"}` : "", days ? `продлено на ${days} дн.` : "", suspend === true ? "приостановлен" : suspend === false ? "включён" : ""].filter(Boolean).join(", ");
+  if (what) await pool.query("SELECT platform_log($1, $2, $3, $4)", [id, actor.email, `${actor.email}: ${what}`, JSON.stringify({ plan, days, suspend, reason: input.reason ?? null })]);
   return (await platformTenants(actor, now)).find((row) => row.id === id);
 }

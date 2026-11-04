@@ -18,7 +18,12 @@ export default function LoginPage() {
           event.preventDefault();
           setError("");
           try {
-            await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+            const signed = await api<{ actor: { role: string } | null; platform?: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+            // PLAT-CABINET-05: the platform team goes to its own cabinet, not into a salon.
+            if (signed.platform) {
+              router.push("/platform");
+              return;
+            }
             const me = await api<{ actor: { role: string } }>("/api/auth/me");
             router.push(me.actor.role === "accountant" ? "/cash" : "/journal");
           } catch (err) {

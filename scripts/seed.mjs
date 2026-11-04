@@ -297,6 +297,78 @@ await client.query(
 await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id = $1", [serviceIds.spa]);
 await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
 
+// PLAT-CABINET: a few more salons on the platform so the platform owner's cabinet has something to show.
+// PLAT-CABINET-05: the platform owner signs in apart from any salon (PLATFORM_ADMIN_EMAILS=platform@ambeauty.local).
+await client.query("INSERT INTO users (id, email, password_hash, name) VALUES ($1, 'platform@ambeauty.local', $2, 'Владелец платформы')", [crypto.randomUUID(), hash]);
+const demoSalons = [
+  { n: 1, name: "Studio Lumière", plan: "salon", months: 6, agoDays: 200, paidMonths: [190, 10], activityDays: 0, staff: 7, branches: 1 },
+  { n: 2, name: "Nail Bar «Кокос»", plan: "start", months: 1, agoDays: 120, paidMonths: [110, 80, 50, 20], activityDays: 1, staff: 3, branches: 1 },
+  { n: 3, name: "Сеть «Барбершоп 17»", plan: "network", months: 12, agoDays: 300, paidMonths: [290], activityDays: 0, staff: 26, branches: 4 },
+  { n: 4, name: "Brow Lab", plan: "start", months: 1, agoDays: 75, paidMonths: [64, 33], activityDays: 19, staff: 2, branches: 1, ended: true },
+  { n: 5, name: "Салон «Мята»", plan: "trial", agoDays: 12, paidMonths: [], activityDays: 2, staff: 4, branches: 1 },
+  { n: 6, name: "Beauty Loft", plan: "trial", agoDays: 6, paidMonths: [], activityDays: 0, staff: 5, branches: 1 },
+  { n: 7, name: "SPA «Лотос»", plan: "salon", months: 1, agoDays: 160, paidMonths: [150, 120, 90, 60, 31], activityDays: 3, staff: 9, branches: 2, pending: true },
+  { n: 8, name: "Lash & Go", plan: "start", months: 1, agoDays: 95, paidMonths: [85, 55], activityDays: 40, staff: 2, branches: 1, suspended: "Долг за 2 месяца" },
+];
+const demoId = (n, kind) => `d${kind}${String(n).padStart(6, "0")}-0000-4000-8000-00000000000${n}`;
+await client.query("DELETE FROM tenants WHERE id::text LIKE 'd0%' OR id::text LIKE 'd1%'");
+await client.query("DELETE FROM users WHERE email LIKE '%@demo-salon.local'");
+await client.query("DELETE FROM platform_tasks WHERE created_by = 'demo'");
+await client.query("DELETE FROM platform_actions WHERE actor_email = 'demo'");
+const priceOf = { start: 149000, salon: 349000, network: 799000 };
+const discountOf = { 1: 1, 6: 0.9, 12: 0.8 };
+for (const item of demoSalons) {
+  const id = demoId(item.n, "0");
+  const branchId = demoId(item.n, "1");
+  const ownerId = crypto.randomUUID();
+  const created = new Date(Date.now() - item.agoDays * 86400000);
+  const lastPaid = item.paidMonths.at(-1);
+  const paidUntil = lastPaid === undefined ? null : new Date(Date.now() + (item.months * 30 - lastPaid) * 86400000 - (item.ended ? 6 * 86400000 : 0));
+  await client.query(
+    `INSERT INTO tenants (id, name, slug, plan, trial_ends_at, paid_until, suspended_at, suspended_reason, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [id, item.name, `demo-${item.n}`, item.plan, new Date(created.getTime() + 14 * 86400000), paidUntil, item.suspended ? new Date(Date.now() - 5 * 86400000) : null, item.suspended ?? "", created],
+  );
+  for (let b = 0; b < item.branches; b += 1) {
+    await client.query("INSERT INTO branches (id, tenant_id, name, slug, created_at) VALUES ($1, $2, $3, $4, $5)", [b === 0 ? branchId : crypto.randomUUID(), id, b === 0 ? item.name : `${item.name} · ${b + 1}`, `demo-${item.n}-${b}`, created]);
+  }
+  await client.query("INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4)", [ownerId, `owner${item.n}@demo-salon.local`, hash, `Владелец ${item.n}`]);
+  await client.query("INSERT INTO memberships (id, tenant_id, user_id, role, created_at) VALUES ($1, $2, $3, 'owner', $4)", [crypto.randomUUID(), id, ownerId, created]);
+  for (let s = 0; s < item.staff; s += 1) {
+    await client.query("INSERT INTO staff (id, tenant_id, display_name) VALUES ($1, $2, $3)", [crypto.randomUUID(), id, `Мастер ${s + 1}`]);
+  }
+  let number = 0;
+  for (const ago of item.paidMonths) {
+    number += 1;
+    const at = new Date(Date.now() - ago * 86400000);
+    await client.query(
+      `INSERT INTO saas_invoices (id, tenant_id, number, plan, months, amount_minor, status, provider, created_at, paid_at, period_from, period_to)
+       VALUES ($1, $2, $3, $4, $5, $6, 'paid', 'yookassa', $7, $7, $7, $8)`,
+      [crypto.randomUUID(), id, number, item.plan, item.months, Math.round(priceOf[item.plan] * item.months * discountOf[item.months]), at, new Date(at.getTime() + item.months * 30 * 86400000)],
+    );
+  }
+  if (item.pending) {
+    await client.query(
+      "INSERT INTO saas_invoices (id, tenant_id, number, plan, months, amount_minor, status, provider, created_at) VALUES ($1, $2, $3, 'salon', 6, $4, 'pending', 'yookassa', now() - interval '1 day')",
+      [crypto.randomUUID(), id, number + 1, Math.round(349000 * 6 * 0.9)],
+    );
+  }
+  await client.query(
+    "INSERT INTO audit_log (id, tenant_id, branch_id, actor_id, entity, action, created_at) VALUES ($1, $2, $3, $4, 'appointment', 'appointment.created', $5)",
+    [crypto.randomUUID(), id, branchId, ownerId, new Date(Date.now() - item.activityDays * 86400000 - 3600000)],
+  );
+}
+const task = (n, title, dueDays) => client.query(
+  "INSERT INTO platform_tasks (id, tenant_id, title, due_on, created_by) VALUES ($1, $2, $3, (now() + make_interval(days => $4))::date, 'demo')",
+  [crypto.randomUUID(), n ? demoId(n, "0") : null, title, dueDays],
+);
+await task(4, "Позвонить: подписка закончилась, узнать почему не продлили", -1);
+await task(5, "Пробный кончается — показать зарплаты и склад, предложить «Салон»", 1);
+await task(7, "Счёт на 6 месяцев выставлен, проверить оплату", 2);
+await task(3, "Сеть просит выгрузку по API в 1С — обсудить", 5);
+await task(0, "Подключить боевую ЮKassa платформы", 7);
+await client.query("INSERT INTO platform_actions (id, tenant_id, actor_email, action, created_at) VALUES ($1, $2, 'demo', 'olga@ambeauty.local: приостановлен', now() - interval '5 days')", [crypto.randomUUID(), demoId(8, "0")]);
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);
