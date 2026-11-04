@@ -46,7 +46,7 @@ function at(hours, minutes) {
 await client.query("BEGIN");
 await client.query("DELETE FROM tenants WHERE id = $1", [tenant]);
 await client.query("DELETE FROM users WHERE email LIKE '%@ambeauty.local'");
-await client.query("INSERT INTO tenants (id, name, slug) VALUES ($1, 'Am Beauty', 'am-beauty')", [tenant]);
+await client.query("INSERT INTO tenants (id, name, slug, trial_ends_at) VALUES ($1, 'Am Beauty', 'am-beauty', now() + interval '9 days')", [tenant]);
 await client.query(
   `INSERT INTO branches (id, tenant_id, name, address, timezone, require_payment_on_complete, slug,
      fiscal_enabled, fiscal_inn, fiscal_place, acquiring_enabled)

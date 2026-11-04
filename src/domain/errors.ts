@@ -7,7 +7,9 @@ export type ErrorCode =
   | "SHIFT_CLOSED"
   | "NOT_FOUND"
   | "STALE"
-  | "SOFT_CONFIRM";
+  | "SOFT_CONFIRM"
+  | "PLAN_LIMIT"
+  | "PAYMENT_REQUIRED";
 
 export class AppError extends Error {
   readonly code: ErrorCode;
@@ -53,6 +55,11 @@ export function mapPgError(error: unknown): unknown {
   }
   if (pg?.code === "23P01" && pg.constraint === "payroll_periods_no_overlap") {
     return new AppError("VALIDATION", "Период пересекается с другим периодом филиала");
+  }
+  const limit = /^PLAN_LIMIT:(staff|branches):(\d+)/.exec((error as { message?: string })?.message ?? "");
+  if (pg?.code === "P0001" && limit) {
+    const what = limit[1] === "staff" ? `до ${limit[2]} активных мастеров` : `до ${limit[2]} филиалов`;
+    return new AppError("PLAN_LIMIT", `На вашем тарифе можно ${what}. Смените тариф в «Подписке»`, { limit: limit[1], max: Number(limit[2]) });
   }
   if (pg?.code === "22P02") {
     return new AppError("NOT_FOUND", "Не найдено");

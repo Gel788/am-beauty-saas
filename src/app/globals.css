@@ -795,3 +795,31 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .mini-cal-today { display: block; width: 100%; margin-top: 6px; border: 0; background: rgba(124, 92, 255, 0.08); color: #6d4fe0; border-radius: 10px; padding: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
 @media (max-width: 980px) { .mini-cal { display: none; } }
 @media (max-height: 900px) and (min-width: 981px) { .nav-item { padding: 5px 10px; font-size: 13.5px; } .wordmark { padding-bottom: 8px; } .salon-switch { margin-bottom: 8px; } }
+
+/* Phase 4 · PLAT: subscription and platform admin */
+.billing-banner { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.billing-banner a { font-weight: 650; color: inherit; text-decoration: underline; }
+.billing-banner.bad { background: #ffe5ea; color: #8f1d3d; }
+.billing-head { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.billing-head > svg { width: 28px; height: 28px; flex: none; color: #7c5cff; }
+.billing-head.warn > svg { color: #c07a12; }
+.billing-head.bad > svg { color: #c0244f; }
+.billing-head.bad { background: #fff0f3; }
+.billing-head > div:first-of-type { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 240px; }
+.billing-head span { color: var(--muted); font-size: 13px; }
+.billing-usage { display: flex; gap: 16px; font-size: 13px; }
+.billing-usage span { color: var(--ink) !important; }
+.plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.plan-card { display: flex; flex-direction: column; gap: 10px; }
+.plan-card.featured { box-shadow: 0 0 0 2px #c9b6ff, 0 16px 34px rgba(110, 60, 150, 0.12); }
+.plan-card.current { box-shadow: 0 0 0 2px #7c5cff; }
+.plan-card ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; flex: 1; }
+.plan-card li { display: flex; gap: 6px; align-items: center; }
+.plan-card li svg { color: #17a065; flex: none; }
+.plan-price { font-size: 28px; }
+.platform-table td small { display: block; font-size: 11.5px; }
+.platform-table td { vertical-align: top; }
+.platform-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.state-trial { color: #6a3fd6; } .state-active { color: #137a45; } .state-grace { color: #93540c; } .state-expired, .state-suspended { color: #b0204f; }
+@media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr; } }
+.platform-table td.nowrap { white-space: nowrap; }
