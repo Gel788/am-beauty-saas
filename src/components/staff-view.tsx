@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type ApiError } from "./api";
+import { StaffPay } from "./staff-pay";
 import { initials, Modal, useToast } from "./ui";
 
 type Staff = { id: string; displayName: string; color: string; specialties: string; active: boolean; onlineBookable: boolean; branchIds: string[] };
@@ -31,6 +32,7 @@ const STATUS: Record<Request["status"], [string, string]> = {
   withdrawn: ["отозван", "tag-muted"],
 };
 const ADMIN = ["owner", "admin", "super"];
+const PAY = ["owner", "admin", "accountant", "super"];
 
 const hhmm = (value: number) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 const toMin = (value: string) => {
@@ -151,6 +153,7 @@ function TeamView({ me }: { me: Me }) {
           {person ? (
             <div className="list" key={`${person.id}-${scheduleBranch}`}>
               <Profile person={person} branches={me.branches} staff={staff} canEdit={canEdit} onChanged={load} />
+              {PAY.includes(me.actor.role) && <StaffPay staffId={person.id} />}
               <WeekEditor staffId={person.id} branchId={scheduleBranch} mode={canEdit ? "edit" : "view"} />
               <Exceptions staffId={person.id} branchId={scheduleBranch} canEdit={canEdit} />
             </div>

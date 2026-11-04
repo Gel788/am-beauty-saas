@@ -297,6 +297,20 @@ await client.query(
 await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id = $1", [serviceIds.spa]);
 await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
 
+// PAYROLL-SHIFT-*: how masters are paid — per shift, percent, both, or percent with a shift-rate minimum.
+for (const [staffId, scheme, percentBps, salaryMinor, periodUnit, guarantee] of [
+  [staff.alina, "hybrid", 3000, 150000, "shift", false],
+  [staff.marina, "hybrid", 4000, 200000, "shift", true],
+  [staff.denis, "percent", 4000, 0, "month", false],
+  [staff.elena, "salary", 0, 300000, "shift", false],
+]) {
+  await client.query(
+    `INSERT INTO payroll_rules (id, tenant_id, staff_id, scheme, percent_bps, salary_minor, period_unit, guarantee, valid_from)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '2026-01-01')`,
+    [crypto.randomUUID(), tenant, staffId, scheme, percentBps, salaryMinor, periodUnit, guarantee],
+  );
+}
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);

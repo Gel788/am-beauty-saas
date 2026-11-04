@@ -36,7 +36,7 @@ type Item = {
   lines: Line[];
 };
 type Sheet = { id: string; startsOn: string; endsOn: string; status: Status; warnings: { code: string; message: string }[]; items: Item[] };
-type Rule = {
+export type Rule = {
   id: string;
   staffId: string | null;
   serviceId: string | null;
@@ -44,10 +44,11 @@ type Rule = {
   percentBps: number;
   fixedMinor: number;
   salaryMinor: number;
-  periodUnit: "month" | "biweekly" | "week";
+  periodUnit: "month" | "biweekly" | "week" | "shift";
   base: string;
   includeTips: boolean;
   deductMaterials?: boolean;
+  guarantee?: boolean;
   validFrom: string;
   validTo: string | null;
 };
@@ -66,7 +67,20 @@ const SCHEMES: Record<Rule["scheme"], string> = {
   salary: "Оклад",
   hybrid: "Оклад + процент",
 };
-const UNITS: Record<Rule["periodUnit"], string> = { month: "в месяц", biweekly: "за 2 недели", week: "в неделю" };
+/** What the owner picks; each kind maps to a scheme and, for shift pay, period «shift». */
+export const KINDS = {
+  percent: { label: "Процент с услуги", scheme: "percent", shift: false, guarantee: false },
+  shift: { label: "За выход", scheme: "salary", shift: true, guarantee: false },
+  shift_percent: { label: "За выход + процент", scheme: "hybrid", shift: true, guarantee: false },
+  shift_guarantee: { label: "Процент, но не меньше ставки за выход", scheme: "hybrid", shift: true, guarantee: true },
+  fixed_per_service: { label: "Фикс за услугу", scheme: "fixed_per_service", shift: false, guarantee: false },
+  salary: { label: "Оклад", scheme: "salary", shift: false, guarantee: false },
+  hybrid: { label: "Оклад + процент", scheme: "hybrid", shift: false, guarantee: false },
+} as const;
+export type Kind = keyof typeof KINDS;
+export const kindOf = (rule: Rule) =>
+  rule.periodUnit === "shift" ? (rule.scheme === "salary" ? "За выход" : rule.guarantee ? "Процент, но не меньше ставки за выход" : "За выход + процент") : SCHEMES[rule.scheme];
+const UNITS: Record<Exclude<Rule["periodUnit"], "shift">, string> = { month: "в месяц", biweekly: "за 2 недели", week: "в неделю" };
 const LINE_TYPES: Record<string, string> = {
   service: "Услуга",
   salary: "Оклад",
@@ -77,6 +91,19 @@ const LINE_TYPES: Record<string, string> = {
   refund_clawback: "Сторно",
   group: "Группа",
 };
+const lineType = (line: { type: string; rate?: unknown }) =>
+  line.type === "salary" && (line.rate as { periodUnit?: string } | null)?.periodUnit === "shift" ? "Выходы" : LINE_TYPES[line.type] ?? line.type;
+export function describeRule(rule: Rule, money: (minor: number) => string) {
+  const parts: string[] = [];
+  if (rule.scheme === "percent" || rule.scheme === "hybrid") parts.push(`${rule.percentBps / 100}% ${rule.base === "paid_amount" ? "от оплаченного" : "от цены"}`);
+  if (rule.scheme === "fixed_per_service") parts.push(`${money(rule.fixedMinor)} за услугу`);
+  if ((rule.scheme === "salary" || rule.scheme === "hybrid") && rule.periodUnit === "shift") parts.push(`${money(rule.salaryMinor)} за выход${rule.guarantee ? " (минимум)" : ""}`);
+  else if (rule.scheme === "salary" || rule.scheme === "hybrid") parts.push(`оклад ${money(rule.salaryMinor)} ${UNITS[rule.periodUnit as keyof typeof UNITS]}`);
+  if (rule.deductMaterials) parts.push("за вычетом материалов");
+  if (!rule.includeTips) parts.push("без чаевых");
+  return parts.join(", ");
+}
+
 const SETUP = ["owner", "admin", "accountant", "super"];
 const MONEY = ["owner", "accountant", "super"];
 
@@ -327,7 +354,7 @@ function PeriodSheet({ id, role, money, onError, onBack }: { id: string; role: s
                 <tr key={line.id}>
                   <td>{line.occurredOn ? dayLabel(line.occurredOn) : "—"}</td>
                   <td>
-                    <span className="tag tag-muted" style={{ marginRight: 6 }}>{LINE_TYPES[line.type] ?? line.type}</span>
+                    <span className="tag tag-muted" style={{ marginRight: 6 }}>{lineType(line)}</span>
                     {line.title}
                     {line.reason && <span className="muted"> · {line.reason}</span>}
                   </td>
@@ -377,7 +404,7 @@ function PaySlip({ sheet, item, money, onClose }: { sheet: Sheet; item: Item; mo
             {item.lines.map((line) => (
               <tr key={line.id}>
                 <td>{line.occurredOn ? dayLabel(line.occurredOn) : "—"}</td>
-                <td>{LINE_TYPES[line.type] ?? line.type}: {line.title}{line.reason ? ` · ${line.reason}` : ""}</td>
+                <td>{lineType(line)}: {line.title}{line.reason ? ` · ${line.reason}` : ""}</td>
                 <td className="muted">{rateLabel(line, money)}</td>
                 <td className="num">{money(line.resultMinor)}</td>
               </tr>
@@ -450,7 +477,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
   const [form, setForm] = useState({
     staffId: "",
     serviceId: "",
-    scheme: "percent" as Rule["scheme"],
+    kind: "percent" as Kind,
     percent: "40",
     fixed: "",
     salary: "",
@@ -477,8 +504,9 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
 
   const staffName = (id: string | null) => (id ? staff.find((member) => member.id === id)?.displayName ?? "Мастер" : "Все мастера");
   const serviceName = (id: string | null) => (id ? services.find((service) => service.id === id)?.title ?? "Услуга" : "все услуги");
-  const withPercent = form.scheme === "percent" || form.scheme === "hybrid";
-  const withSalary = form.scheme === "salary" || form.scheme === "hybrid";
+  const kind = KINDS[form.kind];
+  const withPercent = kind.scheme === "percent" || kind.scheme === "hybrid";
+  const withSalary = kind.scheme === "salary" || kind.scheme === "hybrid";
 
   async function save() {
     onError("");
@@ -488,11 +516,12 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
         body: JSON.stringify({
           staffId: form.staffId || null,
           serviceId: form.serviceId || null,
-          scheme: form.scheme,
+          scheme: kind.scheme,
           percentBps: withPercent ? Math.round(Number(form.percent.replace(",", ".")) * 100) : 0,
-          fixedMinor: form.scheme === "fixed_per_service" ? rublesToMinor(Number(form.fixed.replace(",", "."))) : 0,
+          fixedMinor: kind.scheme === "fixed_per_service" ? rublesToMinor(Number(form.fixed.replace(",", "."))) : 0,
           salaryMinor: withSalary ? rublesToMinor(Number(form.salary.replace(",", "."))) : 0,
-          periodUnit: form.periodUnit,
+          periodUnit: kind.shift ? "shift" : form.periodUnit,
+          guarantee: kind.guarantee,
           base: form.base,
           includeTips: form.includeTips,
           deductMaterials: withPercent && form.deductMaterials,
@@ -516,15 +545,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
     }
   }
 
-  function describe(rule: Rule) {
-    const parts: string[] = [];
-    if (rule.scheme === "percent" || rule.scheme === "hybrid") parts.push(`${rule.percentBps / 100}% ${rule.base === "paid_amount" ? "от оплаченного" : "от цены"}`);
-    if (rule.scheme === "fixed_per_service") parts.push(`${money(rule.fixedMinor)} за услугу`);
-    if (rule.scheme === "salary" || rule.scheme === "hybrid") parts.push(`оклад ${money(rule.salaryMinor)} ${UNITS[rule.periodUnit]}`);
-    if (rule.deductMaterials) parts.push("за вычетом материалов");
-    if (!rule.includeTips) parts.push("без чаевых");
-    return parts.join(", ");
-  }
+
 
   return (
     <>
@@ -539,8 +560,8 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
             <option value="">На все услуги</option>
             {services.map((service) => <option key={service.id} value={service.id}>{service.title}</option>)}
           </select>
-          <select className="report-date" value={form.scheme} onChange={(event) => setForm({ ...form, scheme: event.target.value as Rule["scheme"] })}>
-            {Object.entries(SCHEMES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          <select className="report-date" value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as Kind })}>
+            {Object.entries(KINDS).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
           </select>
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>
@@ -554,15 +575,19 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
               </select>
             </>
           )}
-          {form.scheme === "fixed_per_service" && (
+          {kind.scheme === "fixed_per_service" && (
             <input className="report-date" style={{ width: 140 }} inputMode="decimal" placeholder="Фикс, ₽" value={form.fixed} onChange={(event) => setForm({ ...form, fixed: event.target.value })} />
           )}
           {withSalary && (
             <>
-              <input className="report-date" style={{ width: 140 }} inputMode="decimal" placeholder="Оклад, ₽" value={form.salary} onChange={(event) => setForm({ ...form, salary: event.target.value })} />
-              <select className="report-date" value={form.periodUnit} onChange={(event) => setForm({ ...form, periodUnit: event.target.value as Rule["periodUnit"] })}>
-                {Object.entries(UNITS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
+              <input className="report-date" style={{ width: 160 }} inputMode="decimal" placeholder={kind.shift ? "За выход, ₽" : "Оклад, ₽"} value={form.salary} onChange={(event) => setForm({ ...form, salary: event.target.value })} />
+              {kind.shift ? (
+                <span className="muted">за смену</span>
+              ) : (
+                <select className="report-date" value={form.periodUnit} onChange={(event) => setForm({ ...form, periodUnit: event.target.value as Rule["periodUnit"] })}>
+                  {Object.entries(UNITS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              )}
             </>
           )}
           {withPercent && (
@@ -573,6 +598,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
           <input className="report-date" type="date" value={form.validFrom} onChange={(event) => setForm({ ...form, validFrom: event.target.value })} />
           <button className="btn-gradient" onClick={save}>Добавить</button>
         </div>
+        {kind.shift && <small className="muted">Выход засчитывается за рабочий день по графику, который уже прошёл (выходные и отпуск не считаются), и за любой день, когда мастер завершил визит.{kind.guarantee ? " Мастер получает процент, а если он меньше ставки за выходы, CRM доплачивает разницу." : ""}</small>}
         <small className="muted">Порядок: правило мастера на услугу → правило мастера → правило для всех. Чтобы сменить ставку, закройте старое правило и добавьте новое с нужной даты.</small>
       </div>
       <div className="panel list">
@@ -584,8 +610,8 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
             {rules?.map((rule) => (
               <tr key={rule.id}>
                 <td>{staffName(rule.staffId)}{rule.serviceId && <span className="muted"> · {serviceName(rule.serviceId)}</span>}</td>
-                <td>{SCHEMES[rule.scheme]}</td>
-                <td>{describe(rule)}</td>
+                <td>{kindOf(rule)}</td>
+                <td>{describeRule(rule, money)}</td>
                 <td className="muted">с {dayLabel(rule.validFrom)}{rule.validTo ? ` по ${dayLabel(rule.validTo)}` : ""}</td>
                 <td className="num"><button className="btn danger" onClick={() => remove(rule.id)}>Удалить</button></td>
               </tr>
