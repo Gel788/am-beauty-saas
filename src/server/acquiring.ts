@@ -11,6 +11,10 @@ import { many, one, poolOne, withSession } from "./db";
 import { createPayment, LIVE_PAYMENT, NET_AMOUNT } from "./payments";
 import type { Actor, Ctx } from "./types";
 import { formatMoney } from "@/domain/money";
+import { enabledProviders, integrationConfig } from "./integrations";
+import type { Config } from "./providers/http";
+import { tbankProvider } from "./providers/tbank";
+import { yookassaProvider } from "./providers/yookassa";
 import { appointmentValues, deliverToClient, notifyDesk, render, templateBody, type SendResult } from "./messaging";
 
 export const ACQUIRING_ACTOR_ID = "00000000-0000-0000-0000-0000000000c2";
@@ -21,6 +25,10 @@ export type AcquiringProvider = {
   label: string;
   /** Sandbox providers are paid on our own page; real ones redirect to confirmationUrl. */
   sandbox?: boolean;
+  /** Real providers run on the salon's own keys from «Интеграции». */
+  needsConfig?: boolean;
+  /** Body to answer a webhook with, when the provider wants something other than JSON. */
+  ack?: string;
   createPayment: (input: {
     id: string;
     amountMinor: number;
@@ -28,9 +36,11 @@ export type AcquiringProvider = {
     returnUrl: string;
     payPageUrl: string;
     expiresAt: Date;
-  }) => Promise<{ externalId: string; confirmationUrl: string }>;
+  }, config?: Config) => Promise<{ externalId: string; confirmationUrl: string }>;
+  /** The provider's payment id from an unverified webhook body: finds the tenant whose keys verify it. */
+  externalIdOf?: (body: unknown) => string | null;
   /** Verifies and parses a webhook; null means "not ours / ignore". */
-  parseWebhook?: (body: unknown, headers: Headers) => Promise<{ externalId: string; status: ProviderStatus; method?: "card" | "sbp" } | null>;
+  parseWebhook?: (body: unknown, headers: Headers, config?: Config) => Promise<{ externalId: string; status: ProviderStatus; method?: "card" | "sbp" } | null>;
 };
 
 const testProvider: AcquiringProvider = {
@@ -41,12 +51,20 @@ const testProvider: AcquiringProvider = {
     return { externalId: `test-${input.id}`, confirmationUrl: input.payPageUrl };
   },
 };
-const providers = new Map<string, AcquiringProvider>([[testProvider.name, testProvider]]);
+const providers = new Map<string, AcquiringProvider>([
+  [testProvider.name, testProvider],
+  [yookassaProvider.name, yookassaProvider],
+  [tbankProvider.name, tbankProvider],
+]);
 export function registerAcquiringProvider(provider: AcquiringProvider) {
   providers.set(provider.name, provider);
 }
-export function acquiringProviders() {
-  return [...providers.values()].map((provider) => ({ name: provider.name, label: provider.label }));
+/** What a branch may pick: the sandbox plus providers the salon connected in «Интеграции». */
+export async function acquiringProviders(ctx: Ctx) {
+  const enabled = await enabledProviders(ctx, "acquiring");
+  return [...providers.values()]
+    .filter((provider) => !provider.needsConfig || enabled.has(provider.name))
+    .map((provider) => ({ name: provider.name, label: provider.label }));
 }
 export function acquiringProvider(name: string) {
   return providers.get(name) ?? null;
@@ -144,9 +162,11 @@ export async function createPayLink(
   const services = await many<{ title_snapshot: string }>(ctx.db, "SELECT title_snapshot FROM appointment_services WHERE appointment_id = $1 ORDER BY position", [appointmentId]);
   const description = `${purpose === "deposit" ? "Предоплата" : "Оплата"}: ${services.map((row) => row.title_snapshot).join(", ") || "визит"}`.slice(0, 128);
   const payPageUrl = `${input.origin}/pay/${token}`;
+  const config = provider.needsConfig ? await integrationConfig(ctx, provider.name) : {};
+  if (!config) throw new AppError("VALIDATION", `${provider.label} отключён в «Настройки → Интеграции»`);
   let created: { externalId: string; confirmationUrl: string };
   try {
-    created = await provider.createPayment({ id, amountMinor: amount, description, returnUrl: payPageUrl, payPageUrl, expiresAt });
+    created = await provider.createPayment({ id, amountMinor: amount, description, returnUrl: payPageUrl, payPageUrl, expiresAt }, config);
   } catch (error) {
     throw new AppError("VALIDATION", `Провайдер оплаты не ответил: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -329,13 +349,30 @@ export async function sandboxPay(ctx: Ctx, id: string, action: "card" | "sbp" | 
 }
 
 /** Webhook entry: the provider adapter verifies the body; then the row is found by the provider's id. */
-export async function handleWebhook(providerName: string, body: unknown, headers: Headers) {
+export async function handleWebhook(providerName: string, body: unknown, headers: Headers): Promise<{ ok: true; ignored?: true; ack?: string }> {
   const provider = providers.get(providerName);
   if (!provider?.parseWebhook) throw new AppError("NOT_FOUND", "Не найдено");
-  const event = await provider.parseWebhook(body, headers);
-  if (!event) return { ok: true, ignored: true };
-  const row = await poolOne<{ tenant_id: string; online_payment_id: string }>("SELECT tenant_id, online_payment_id FROM acquiring_lookup($1, $2)", [providerName, event.externalId]);
-  if (!row) return { ok: true, ignored: true };
-  await asAcquiring(row.tenant_id, (ctx) => applyProviderStatus(ctx, row.online_payment_id, event.status, event.method));
-  return { ok: true };
+  const ack = provider.ack ? { ack: provider.ack } : {};
+  if (!provider.needsConfig) {
+    const event = await provider.parseWebhook(body, headers);
+    if (!event) return { ok: true, ignored: true, ...ack };
+    const row = await poolOne<{ tenant_id: string; online_payment_id: string }>("SELECT tenant_id, online_payment_id FROM acquiring_lookup($1, $2)", [providerName, event.externalId]);
+    if (!row) return { ok: true, ignored: true, ...ack };
+    await asAcquiring(row.tenant_id, (ctx) => applyProviderStatus(ctx, row.online_payment_id, event.status, event.method));
+    return { ok: true, ...ack };
+  }
+  // Per-salon keys: find the payment by the id the body claims, then verify with that salon's keys.
+  const claimed = provider.externalIdOf?.(body);
+  if (!claimed) return { ok: true, ignored: true, ...ack };
+  const row = await poolOne<{ tenant_id: string; online_payment_id: string }>("SELECT tenant_id, online_payment_id FROM acquiring_lookup($1, $2)", [providerName, claimed]);
+  if (!row) return { ok: true, ignored: true, ...ack };
+  const applied = await asAcquiring(row.tenant_id, async (ctx) => {
+    const config = await integrationConfig(ctx, providerName);
+    if (!config) return false;
+    const event = await provider.parseWebhook!(body, headers, config);
+    if (!event || event.externalId !== claimed) return false;
+    await applyProviderStatus(ctx, row.online_payment_id, event.status, event.method);
+    return true;
+  });
+  return applied ? { ok: true, ...ack } : { ok: true, ignored: true, ...ack };
 }

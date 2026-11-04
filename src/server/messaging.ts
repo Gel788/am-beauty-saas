@@ -1,8 +1,8 @@
 /**
  * Messaging (MSG-*): channels, templates, delivery to a client, manual messages, desk notifications.
  * Channels are tried in the tenant's order (tenants.message_channels); the first that delivers wins.
- * - telegram: the platform bot, for clients who linked their chat (TELEGRAM_BOT_TOKEN)
- * - sms: SMS.ru when SMS_RU_API_KEY is set; other gateways plug in with registerChannel
+ * - telegram: the salon's own bot (Интеграции) or the platform bot (TELEGRAM_BOT_TOKEN), for linked chats
+ * - sms: the salon's SMS.ru / SMSC account (Интеграции), else the server's SMS_RU_API_KEY
  * - log: records the message without sending, so nothing is lost while channels are not connected
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -11,16 +11,19 @@ import { formatMoney } from "@/domain/money";
 import { isAdminPlus } from "./access";
 import { audit } from "./audit";
 import { many, one } from "./db";
+import { activeIntegration } from "./integrations";
+import { smscSend, smsRuSend } from "./providers/sms";
+import { setTelegramTransport, telegramApi, telegramFaked } from "./providers/telegram";
 import type { BranchRow, Ctx } from "./types";
 
 export type Button = { text: string; data?: string; url?: string };
-export type OutgoingMessage = { recipient: string; body: string; buttons?: Button[] };
+export type OutgoingMessage = { recipient: string; body: string; buttons?: Button[]; /** The chat was linked through the salon's own bot. */ ownBot?: boolean };
 export type Delivery = { ok: true } | { ok: false; error: string };
 export type Channel = {
   name: string;
   /** What the channel sends to: a phone number (default) or a linked Telegram chat. */
   address?: "phone" | "telegram";
-  deliver: (message: OutgoingMessage) => Promise<Delivery>;
+  deliver: (message: OutgoingMessage, ctx: Ctx) => Promise<Delivery>;
 };
 
 const CHANNELS = new Map<string, Channel>();
@@ -34,39 +37,34 @@ registerChannel({ name: "log", deliver: async () => ({ ok: true }) });
 
 // ---------------------------------------------------------------- Telegram
 
-type TelegramTransport = (method: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; description?: string; result?: unknown }>;
-let telegramTransport: TelegramTransport | null = null;
+export { setTelegramTransport };
 
-/** Real Bot API, or a fake in tests. */
-export function setTelegramTransport(transport: TelegramTransport | null) {
-  telegramTransport = transport;
-}
-function telegram(): TelegramTransport | null {
-  if (telegramTransport) return telegramTransport;
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
-  return async (method, payload) => {
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return (await response.json()) as { ok: boolean; description?: string };
-  };
-}
 export function publicUrl() {
   return (process.env.PUBLIC_URL || "http://127.0.0.1:43123").replace(/\/$/, "");
 }
 
+/** The platform bot (env). */
 export function telegramBotName() {
-  return process.env.TELEGRAM_BOT_USERNAME || (telegramTransport ? "test_bot" : "");
+  return process.env.TELEGRAM_BOT_USERNAME || (telegramFaked() ? "test_bot" : "");
 }
-export function telegramConfigured() {
-  return Boolean(telegram() && telegramBotName());
+function platformBot() {
+  return Boolean(telegramApi() && telegramBotName());
 }
 
-export async function telegramSend(chatId: string, body: string, buttons?: Button[]): Promise<Delivery> {
-  const api = telegram();
+/** INT-TG-01: the salon's own bot from «Интеграции», when switched on. */
+export async function tenantBot(ctx: Ctx): Promise<{ token: string; username: string; webhookSecret: string } | null> {
+  const own = await activeIntegration(ctx, "telegram");
+  if (!own?.config.token || !own.config.username) return null;
+  return { token: own.config.token, username: own.config.username, webhookSecret: own.config.webhookSecret ?? "" };
+}
+
+/** A bot to link chats through: the salon's own one first, else the platform bot. */
+export async function telegramConfigured(ctx: Ctx) {
+  return Boolean((await tenantBot(ctx)) || platformBot());
+}
+
+export async function telegramSend(chatId: string, body: string, buttons?: Button[], token?: string): Promise<Delivery> {
+  const api = telegramApi(token);
   if (!api) return { ok: false, error: "Telegram-бот не настроен" };
   const reply_markup = buttons?.length
     ? { inline_keyboard: [buttons.map((button) => (button.url ? { text: button.text, url: button.url } : { text: button.text, callback_data: button.data }))] }
@@ -80,8 +78,8 @@ export async function telegramSend(chatId: string, body: string, buttons?: Butto
 }
 
 /** Stops the spinner on an inline button. */
-export async function telegramAnswer(callbackQueryId: string, text?: string) {
-  const api = telegram();
+export async function telegramAnswer(callbackQueryId: string, text?: string, token?: string) {
+  const api = telegramApi(token);
   if (!api) return;
   try {
     await api("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
@@ -90,38 +88,47 @@ export async function telegramAnswer(callbackQueryId: string, text?: string) {
   }
 }
 
-registerChannel({ name: "telegram", address: "telegram", deliver: (message) => telegramSend(message.recipient, message.body, message.buttons) });
+/** A chat is written to through the bot it was linked with. */
+async function sendToChat(ctx: Ctx, chatId: string, ownBot: boolean, body: string, buttons?: Button[]): Promise<Delivery> {
+  if (!ownBot) return telegramSend(chatId, body, buttons);
+  const bot = await tenantBot(ctx);
+  if (!bot) return { ok: false, error: "Свой Telegram-бот салона отключён" };
+  return telegramSend(chatId, body, buttons, bot.token);
+}
+
+registerChannel({ name: "telegram", address: "telegram", deliver: (message, ctx) => sendToChat(ctx, message.recipient, Boolean(message.ownBot), message.body, message.buttons) });
 
 // ---------------------------------------------------------------- SMS
 
-if (process.env.SMS_RU_API_KEY) {
-  registerChannel({
-    name: "sms",
-    async deliver(message) {
-      const url = new URL("https://sms.ru/sms/send");
-      url.searchParams.set("api_id", String(process.env.SMS_RU_API_KEY));
-      url.searchParams.set("to", message.recipient.replace(/^\+/, ""));
-      url.searchParams.set("msg", message.body);
-      url.searchParams.set("json", "1");
-      if (process.env.SMS_SENDER) url.searchParams.set("from", process.env.SMS_SENDER);
-      try {
-        const response = await fetch(url);
-        const data = (await response.json()) as { status?: string; status_text?: string; sms?: Record<string, { status: string; status_text?: string }> };
-        const sms = data.sms ? Object.values(data.sms)[0] : null;
-        if (data.status === "OK" && (!sms || sms.status === "OK")) return { ok: true };
-        return { ok: false, error: sms?.status_text ?? data.status_text ?? "SMS не отправлено" };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    },
-  });
+/** INT-SMS-01: the salon's own SMS gateway first; the server-wide SMS.ru key (env) is the fallback. */
+async function smsGateway(ctx: Ctx): Promise<{ label: string; send: (message: OutgoingMessage) => Promise<Delivery> } | null> {
+  const own = await activeIntegration(ctx, "sms");
+  if (own?.provider === "smsc") return { label: "SMSC.ru", send: (message) => smscSend(own.config, message) };
+  if (own?.provider === "sms_ru") return { label: "SMS.ru", send: (message) => smsRuSend(own.config, message) };
+  if (process.env.SMS_RU_API_KEY) {
+    const config = { apiId: process.env.SMS_RU_API_KEY, sender: process.env.SMS_SENDER ?? "" };
+    return { label: "SMS.ru (ключ сервера)", send: (message) => smsRuSend(config, message) };
+  }
+  return null;
 }
 
-/** For the settings screen: which channels exist on this server. */
-export function channelCatalog() {
+registerChannel({
+  name: "sms",
+  async deliver(message, ctx) {
+    const gateway = await smsGateway(ctx);
+    if (!gateway) return { ok: false, error: "SMS не подключены: «Настройки → Интеграции»" };
+    return gateway.send(message);
+  },
+});
+
+/** For the settings screen: which channels can deliver for this salon right now. */
+export async function channelCatalog(ctx: Ctx) {
+  const bot = await tenantBot(ctx);
+  const sms = await smsGateway(ctx);
+  const telegramHint = bot ? `@${bot.username} (свой бот)` : platformBot() ? `@${telegramBotName()}` : "Подключите своего бота в «Интеграциях»";
   return [
-    { name: "telegram", label: "Telegram-бот", available: telegramConfigured(), hint: telegramConfigured() ? `@${telegramBotName()}` : "Задайте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME" },
-    { name: "sms", label: "SMS", available: CHANNELS.has("sms"), hint: CHANNELS.has("sms") ? "SMS.ru" : "Задайте SMS_RU_API_KEY" },
+    { name: "telegram", label: "Telegram-бот", available: Boolean(bot) || platformBot(), hint: telegramHint },
+    { name: "sms", label: "SMS", available: Boolean(sms), hint: sms ? sms.label : "Подключите SMS.ru или SMSC в «Интеграциях»" },
     { name: "log", label: "Только журнал", available: true, hint: "Сообщение записывается, но не уходит клиенту" },
   ];
 }
@@ -240,10 +247,11 @@ export async function appointmentValues(ctx: Ctx, appointmentId: string, extra: 
 export type SendResult = { id: string; status: "delivered" | "failed"; channel: string; error: string | null };
 
 async function clientAddress(ctx: Ctx, clientId: string) {
-  const row = await one<{ phone: string | null; chat_id: string | null }>(
+  const row = await one<{ phone: string | null; chat_id: string | null; own_bot: boolean | null }>(
     ctx.db,
     `SELECT (SELECT phone_e164 FROM client_phones p WHERE p.client_id = c.id AND p.deleted_at IS NULL ORDER BY p.is_primary DESC LIMIT 1) AS phone,
-            (SELECT chat_id FROM telegram_links t WHERE t.client_id = c.id LIMIT 1) AS chat_id
+            (SELECT chat_id FROM telegram_links t WHERE t.client_id = c.id LIMIT 1) AS chat_id,
+            (SELECT own_bot FROM telegram_links t WHERE t.client_id = c.id LIMIT 1) AS own_bot
      FROM clients c WHERE c.id = $1 AND c.deleted_at IS NULL`,
     [clientId],
   );
@@ -284,7 +292,8 @@ export async function deliverToClient(
       continue;
     }
     // A Telegram chat shows buttons; elsewhere links stay in the text.
-    const result = await target.deliver({ recipient, body: input.body, buttons: target.address === "telegram" ? input.buttons : undefined });
+    const telegram = target.address === "telegram";
+    const result = await target.deliver({ recipient, body: input.body, buttons: telegram ? input.buttons : undefined, ownBot: telegram && Boolean(address?.own_bot) }, ctx);
     if (result.ok) {
       outcome = { channel: name, recipient, error: null };
       break;
@@ -345,7 +354,7 @@ export async function clientMessages(ctx: Ctx, clientId: string) {
   );
   if (!consent) throw new AppError("NOT_FOUND", "Клиент не найден");
   return {
-    telegramConfigured: telegramConfigured(),
+    telegramConfigured: await telegramConfigured(ctx),
     consents: {
       pdAt: consent.consent_pd_at ? new Date(consent.consent_pd_at).toISOString() : null,
       pdSource: consent.consent_pd_source,
@@ -365,7 +374,7 @@ function sha256(value: string) {
 
 /** MSG-TG-LINK-01: a deep link the client (or a staff member) opens to connect the bot. Valid 7 days. */
 export async function telegramLink(ctx: Ctx, target: { clientId?: string; self?: boolean }) {
-  if (!telegramConfigured()) throw new AppError("VALIDATION", "Telegram-бот не настроен на сервере");
+  if (!(await telegramConfigured(ctx))) throw new AppError("VALIDATION", "Telegram-бот не подключён: «Настройки → Интеграции»");
   if (target.clientId && !isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
   if (target.self && !isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") throw new AppError("FORBIDDEN", "Недостаточно прав");
   return issueTelegramLink(ctx, target);
@@ -374,35 +383,38 @@ export async function telegramLink(ctx: Ctx, target: { clientId?: string; self?:
 /** No permission check: the online booking offers the link to the client who just booked. */
 export async function issueTelegramLink(ctx: Ctx, target: { clientId?: string; self?: boolean }) {
   const token = randomBytes(16).toString("hex");
+  const own = await tenantBot(ctx);
   await ctx.db.query(
-    `INSERT INTO telegram_link_tokens (token_hash, tenant_id, client_id, user_id, expires_at)
-     VALUES ($1,$2,$3,$4,$5::timestamptz + interval '7 days')`,
-    [sha256(token), ctx.actor.tenantId, target.clientId ?? null, target.self ? ctx.actor.userId : null, ctx.now.toISOString()],
+    `INSERT INTO telegram_link_tokens (token_hash, tenant_id, client_id, user_id, expires_at, own_bot)
+     VALUES ($1,$2,$3,$4,$5::timestamptz + interval '7 days',$6)`,
+    [sha256(token), ctx.actor.tenantId, target.clientId ?? null, target.self ? ctx.actor.userId : null, ctx.now.toISOString(), Boolean(own)],
   );
-  return { url: `https://t.me/${telegramBotName()}?start=${token}` };
+  return { url: `https://t.me/${own?.username ?? telegramBotName()}?start=${token}` };
 }
 
 /** /start <token> from the bot: binds the chat. Returns the greeting. */
-export async function bindTelegram(ctx: Ctx, token: string, chat: { chatId: string; username?: string | null }) {
-  const row = await one<{ token_hash: string; client_id: string | null; user_id: string | null; expires_at: Date; used_at: Date | null }>(
+export async function bindTelegram(ctx: Ctx, token: string, chat: { chatId: string; username?: string | null }, ownBot = false) {
+  const row = await one<{ token_hash: string; client_id: string | null; user_id: string | null; expires_at: Date; used_at: Date | null; own_bot: boolean }>(
     ctx.db,
     "SELECT * FROM telegram_link_tokens WHERE token_hash = $1 FOR UPDATE",
     [sha256(token)],
   );
-  if (!row || row.used_at || new Date(row.expires_at) <= ctx.now) return "Ссылка устарела. Попросите салон прислать новую.";
+  // A link made for the salon's own bot works only there, and the other way round.
+  if (!row || row.used_at || new Date(row.expires_at) <= ctx.now || Boolean(row.own_bot) !== ownBot) return "Ссылка устарела. Попросите салон прислать новую.";
   await ctx.db.query("UPDATE telegram_link_tokens SET used_at = $2 WHERE token_hash = $1", [row.token_hash, ctx.now.toISOString()]);
   if (row.client_id) {
     await ctx.db.query("DELETE FROM telegram_links WHERE client_id = $1", [row.client_id]);
   } else {
     await ctx.db.query("DELETE FROM telegram_links WHERE user_id = $1", [row.user_id]);
   }
-  await ctx.db.query("INSERT INTO telegram_links (id, tenant_id, client_id, user_id, chat_id, username) VALUES ($1,$2,$3,$4,$5,$6)", [
+  await ctx.db.query("INSERT INTO telegram_links (id, tenant_id, client_id, user_id, chat_id, username, own_bot) VALUES ($1,$2,$3,$4,$5,$6,$7)", [
     crypto.randomUUID(),
     ctx.actor.tenantId,
     row.client_id,
     row.user_id,
     chat.chatId,
     chat.username ?? null,
+    ownBot,
   ]);
   const salon = await one<{ name: string }>(ctx.db, "SELECT name FROM tenants WHERE id = $1", [ctx.actor.tenantId]);
   return row.client_id
@@ -410,8 +422,10 @@ export async function bindTelegram(ctx: Ctx, token: string, chat: { chatId: stri
     : `Готово! Сюда будут приходить уведомления ${salon?.name ?? "салона"}: новые записи, отмены и оплаты.`;
 }
 
-export async function unbindTelegram(ctx: Ctx, chatId: string) {
-  await ctx.db.query("DELETE FROM telegram_links WHERE chat_id = $1", [chatId]);
+/** /stop: drops the links made through this bot. Returns how many. */
+export async function unbindTelegram(ctx: Ctx, chatId: string, ownBot = false) {
+  const done = await ctx.db.query("DELETE FROM telegram_links WHERE chat_id = $1 AND own_bot = $2", [chatId, ownBot]);
+  return done.rowCount ?? 0;
 }
 
 // ---------------------------------------------------------------- Desk notifications
@@ -426,15 +440,15 @@ export async function notifyDesk(
     `INSERT INTO notifications (id, tenant_id, branch_id, kind, title, body, entity, entity_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [id, ctx.actor.tenantId, input.branchId, input.kind, input.title, input.body ?? "", input.entity ?? null, input.entityId ?? null, ctx.now.toISOString()],
   );
-  if (telegram()) {
-    const staff = await many<{ chat_id: string }>(
+  {
+    const staff = await many<{ chat_id: string; own_bot: boolean }>(
       ctx.db,
-      `SELECT DISTINCT l.chat_id FROM telegram_links l
+      `SELECT DISTINCT l.chat_id, l.own_bot FROM telegram_links l
        JOIN memberships m ON m.user_id = l.user_id AND m.tenant_id = l.tenant_id
        WHERE l.user_id IS NOT NULL AND m.role IN ('owner', 'admin') AND (m.branch_id IS NULL OR $1::uuid IS NULL OR m.branch_id = $1)`,
       [input.branchId],
     );
-    for (const row of staff) await telegramSend(row.chat_id, input.body ? `${input.title}\n${input.body}` : input.title);
+    for (const row of staff) await sendToChat(ctx, row.chat_id, row.own_bot, input.body ? `${input.title}\n${input.body}` : input.title);
   }
   return id;
 }
@@ -513,14 +527,14 @@ export async function messagingSettings(ctx: Ctx) {
   );
   const self = await one<{ username: string | null }>(ctx.db, "SELECT username FROM telegram_links WHERE user_id = $1", [ctx.actor.userId]);
   return {
-    channels: channelCatalog(),
+    channels: await channelCatalog(ctx),
     order: tenant?.message_channels?.length ? tenant.message_channels : ["log"],
     legalName: tenant?.legal_name ?? "",
     legalInn: tenant?.legal_inn ?? "",
     privacyEmail: tenant?.privacy_email ?? "",
     templates: await listTemplates(ctx),
     placeholders: PLACEHOLDERS,
-    telegram: { configured: telegramConfigured(), bot: telegramBotName() || null, selfLinked: Boolean(self), selfUsername: self?.username ?? null },
+    telegram: { configured: await telegramConfigured(ctx), bot: (await tenantBot(ctx))?.username ?? (telegramBotName() || null), selfLinked: Boolean(self), selfUsername: self?.username ?? null },
   };
 }
 
@@ -528,7 +542,7 @@ export async function updateMessagingSettings(ctx: Ctx, input: { order?: unknown
   if (ctx.actor.role !== "owner" && ctx.actor.role !== "super") throw new AppError("FORBIDDEN", "Каналы и реквизиты меняет владелец");
   if (input.order !== undefined) {
     const order = Array.isArray(input.order) ? input.order.map(String) : [];
-    const known = new Set(channelCatalog().map((row) => row.name));
+    const known = new Set((await channelCatalog(ctx)).map((row) => row.name));
     const clean = [...new Set(order.filter((name) => known.has(name)))];
     if (!clean.length) throw new AppError("VALIDATION", "Выберите хотя бы один канал");
     await ctx.db.query("UPDATE tenants SET message_channels = $2 WHERE id = $1", [ctx.actor.tenantId, clean]);

@@ -2,7 +2,7 @@
  * 54-ФЗ receipts (FISC-*). A posted payment becomes a receipt document in the same transaction;
  * a provider adapter registers it later (job or right after the request), with retries.
  * Providers are code adapters: `test` registers instantly with made-up fiscal attributes,
- * real ones (АТОЛ Онлайн, ЮKassa, OrangeData…) plug in through registerFiscalProvider.
+ * real ones (АТОЛ Онлайн) run on the salon's keys from «Интеграции» (integrations.ts).
  */
 import { AppError } from "@/domain/errors";
 import { isAdminPlus, loadBranch } from "./access";
@@ -10,6 +10,9 @@ import { many, one, pool, withSession } from "./db";
 import type { Actor, BranchRow, Ctx } from "./types";
 import { formatMoney } from "@/domain/money";
 import { notifyDesk } from "./messaging";
+import { enabledProviders, integrationConfig } from "./integrations";
+import { atolProvider } from "./providers/atol";
+import type { Config } from "./providers/http";
 
 export const FISCAL_ACTOR_ID = "00000000-0000-0000-0000-0000000000c1";
 const MAX_ATTEMPTS = 10;
@@ -46,9 +49,11 @@ export type FiscalResult =
 export type FiscalProvider = {
   name: string;
   label: string;
-  register: (receiptId: string, document: ReceiptDocument) => Promise<FiscalResult>;
+  /** Real kassas run on the salon's own account from «Интеграции». */
+  needsConfig?: boolean;
+  register: (receiptId: string, document: ReceiptDocument, config?: Config) => Promise<FiscalResult>;
   /** For providers that register asynchronously (status `sent`). */
-  check?: (externalId: string) => Promise<FiscalResult>;
+  check?: (externalId: string, config?: Config) => Promise<FiscalResult>;
 };
 
 let testCounter = 0;
@@ -69,12 +74,19 @@ const testProvider: FiscalProvider = {
   },
 };
 
-const providers = new Map<string, FiscalProvider>([[testProvider.name, testProvider]]);
+const providers = new Map<string, FiscalProvider>([
+  [testProvider.name, testProvider],
+  [atolProvider.name, atolProvider],
+]);
 export function registerFiscalProvider(provider: FiscalProvider) {
   providers.set(provider.name, provider);
 }
-export function fiscalProviders() {
-  return [...providers.values()].map((provider) => ({ name: provider.name, label: provider.label }));
+/** What a branch may pick: the test kassa plus kassas the salon connected in «Интеграции». */
+export async function fiscalProviders(ctx: Ctx) {
+  const enabled = await enabledProviders(ctx, "fiscal");
+  return [...providers.values()]
+    .filter((provider) => !provider.needsConfig || enabled.has(provider.name))
+    .map((provider) => ({ name: provider.name, label: provider.label }));
 }
 
 const ELECTRONIC = new Set(["card", "sbp", "transfer"]);
@@ -289,16 +301,20 @@ export async function processReceipts(ctx: Ctx, limit = 20) {
     [ctx.now],
   );
   const stats = { done: 0, sent: 0, failed: 0, retry: 0 };
+  const configs = new Map<string, Config | null>();
   for (const receipt of due) {
     const provider = providers.get(receipt.provider);
+    if (provider?.needsConfig && !configs.has(provider.name)) configs.set(provider.name, await integrationConfig(ctx, provider.name));
+    const config = provider?.needsConfig ? configs.get(provider.name) : {};
     let result: FiscalResult;
     if (!provider) result = { status: "failed", error: `Провайдер «${receipt.provider}» не подключён`, retry: false };
+    else if (!config) result = { status: "failed", error: `${provider.label} отключена в «Настройки → Интеграции»`, retry: false };
     else {
       try {
         result =
           receipt.status === "sent" && receipt.external_id && provider.check
-            ? await provider.check(receipt.external_id)
-            : await provider.register(receipt.id, receipt.document);
+            ? await provider.check(receipt.external_id, config)
+            : await provider.register(receipt.id, receipt.document, config);
       } catch (error) {
         result = { status: "failed", error: error instanceof Error ? error.message : String(error), retry: true };
       }

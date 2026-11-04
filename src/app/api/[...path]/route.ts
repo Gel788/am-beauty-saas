@@ -177,7 +177,8 @@ import {
   updateConsents,
   updateMessagingSettings,
 } from "@/server/messaging";
-import { handleTelegramUpdate, telegramSecretOk } from "@/server/telegram-bot";
+import { handleTelegramUpdate, ownBotFor, telegramSecretOk } from "@/server/telegram-bot";
+import { checkIntegration, deleteIntegration, listIntegrations, saveIntegration } from "@/server/integrations";
 import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
 import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
 import { getCalendar, masterDay, periodReport, periodReportCsv } from "@/server/period";
@@ -300,7 +301,21 @@ async function handle(request: NextRequest, parts: string[]) {
     // The provider adapter verifies the signature; settlement then kicks the receipt.
     const result = await handleWebhook(parts[2], await readJson(request), request.headers);
     void runFiscalJob().catch((error) => console.error("fiscal", error));
+    // Т-Банк wants the bare text OK; the rest take JSON.
+    if (result.ack) return new NextResponse(result.ack, { headers: { "content-type": "text/plain; charset=utf-8" } });
     return NextResponse.json(result);
+  }
+
+  if (method === "POST" && parts[0] === "webhooks" && parts[1] === "telegram" && parts[2] === "t" && parts[3] && !parts[4]) {
+    // The salon's own bot: the secret set with setWebhook proves the update is from Telegram.
+    const bot = await ownBotFor(parts[3], request.headers.get("x-telegram-bot-api-secret-token"));
+    if (!bot) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    try {
+      await handleTelegramUpdate(await readJson(request), new Date(), bot);
+    } catch (error) {
+      console.error("telegram", error);
+    }
+    return NextResponse.json({ ok: true });
   }
 
   if (key === "POST webhooks/telegram") {
@@ -677,6 +692,14 @@ async function handle(request: NextRequest, parts: string[]) {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => markNotificationsRead(ctx, Array.isArray(body.ids) ? body.ids.map(String) : undefined)));
   }
+  if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
+  if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {
+    const body = await readJson(request);
+    const values = body.values && typeof body.values === "object" ? (body.values as Record<string, unknown>) : undefined;
+    return NextResponse.json(await run((ctx) => saveIntegration(ctx, parts[1], { values, enabled: typeof body.enabled === "boolean" ? body.enabled : undefined })));
+  }
+  if (parts[0] === "integrations" && parts[1] && parts[2] === "check" && method === "POST") return NextResponse.json(await run((ctx) => checkIntegration(ctx, parts[1])));
+  if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "DELETE") return NextResponse.json(await run((ctx) => deleteIntegration(ctx, parts[1])));
   if (key === "GET messaging") return NextResponse.json(await run((ctx) => messagingSettings(ctx)));
   if (key === "PATCH messaging") {
     const body = await readJson(request);
@@ -905,7 +928,7 @@ async function handle(request: NextRequest, parts: string[]) {
   if (parts[0] === "appointments" && parts[1] && parts[2] === "payments" && method === "GET") {
     return NextResponse.json(await run((ctx) => appointmentPayments(ctx, parts[1])));
   }
-  if (key === "GET fiscal/providers") return NextResponse.json({ fiscal: fiscalProviders(), acquiring: acquiringProviders() });
+  if (key === "GET fiscal/providers") return NextResponse.json(await run(async (ctx) => ({ fiscal: await fiscalProviders(ctx), acquiring: await acquiringProviders(ctx) })));
   if (key === "GET fiscal/receipts") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(

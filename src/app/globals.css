@@ -711,3 +711,11 @@ h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spac
 .photo-add { display: grid; place-items: center; aspect-ratio: 1; border-radius: 12px; border: 1.5px dashed #cdbfe3; color: var(--muted); font-size: 13px; cursor: pointer; text-align: center; padding: 8px; }
 .photo-view img { width: 100%; max-height: 70vh; object-fit: contain; border-radius: 12px; }
 @media (max-width: 700px) { .tech-health { grid-template-columns: 1fr; } }
+
+/* Integrations (INT-*) */
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.integration-card .btn, .integration-card .btn-ghost { padding: 6px 12px; font-size: 13px; }
+.integration-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,0.8); border: 1px solid rgba(120,80,160,0.12); }
+.integration-card.on { border-color: rgba(15,122,70,0.35); box-shadow: 0 6px 18px rgba(15,122,70,0.07); }
+.integration-ok { font-size: 12.5px; color: #0f7a46; }
+.integration-error { font-size: 12.5px; color: #b4123c; }

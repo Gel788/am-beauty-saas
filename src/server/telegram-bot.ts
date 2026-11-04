@@ -1,14 +1,15 @@
 /**
- * MSG-TG-BOT-01: the platform bot's webhook. One bot serves every salon:
+ * MSG-TG-BOT-01: bot webhooks. The platform bot serves every salon; a salon's own bot (INT-TG-01)
+ * has its own webhook /api/webhooks/telegram/t/<tenant> and only ever sees that salon.
  * - /start <token> links the chat to a client or a staff member (token picks the tenant);
  * - buttons under a reminder confirm (c:<id>) or cancel (x:<id>) the visit;
  * - /stop unlinks the chat everywhere.
  */
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { asOnline, cancelBooking, confirmVisit } from "./booking";
 import { one, poolMany, poolOne } from "./db";
 import { isAppError } from "@/domain/errors";
-import { bindTelegram, telegramAnswer, telegramSend, unbindTelegram } from "./messaging";
+import { bindTelegram, telegramAnswer, telegramSend, tenantBot, unbindTelegram } from "./messaging";
 
 type Update = {
   message?: { chat?: { id?: number | string }; from?: { username?: string }; text?: string };
@@ -25,8 +26,27 @@ export function telegramSecretOk(header: string | null) {
   return !expected || header === expected;
 }
 
-export async function handleTelegramUpdate(update: Update, now = new Date()): Promise<{ ok: true; reply?: string }> {
-  if (update.callback_query) return handleCallback(update.callback_query, now);
+/** The salon's own bot: which tenant and which token to answer with. */
+export type OwnBot = { tenantId: string; token: string };
+
+/** Own-bot webhook: the secret Telegram echoes back must match the one set for this salon. */
+export async function ownBotFor(tenantId: string, header: string | null, now = new Date()): Promise<OwnBot | null> {
+  if (!/^[0-9a-f-]{36}$/.test(tenantId) || !header) return null;
+  const bot = await asOnline(tenantId, (ctx) => tenantBot(ctx), now).catch(() => null);
+  if (!bot?.webhookSecret) return null;
+  const expected = Buffer.from(bot.webhookSecret);
+  const given = Buffer.from(header);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  return { tenantId, token: bot.token };
+}
+
+async function chatTenants(chatId: string, bot?: OwnBot) {
+  if (bot) return [{ tenant_id: bot.tenantId }];
+  return poolMany<{ tenant_id: string }>("SELECT tenant_id FROM telegram_chat_lookup($1)", [chatId]);
+}
+
+export async function handleTelegramUpdate(update: Update, now = new Date(), bot?: OwnBot): Promise<{ ok: true; reply?: string }> {
+  if (update.callback_query) return handleCallback(update.callback_query, now, bot);
   const message = update.message;
   const chatId = message?.chat?.id != null ? String(message.chat.id) : null;
   const text = (message?.text ?? "").trim();
@@ -35,40 +55,41 @@ export async function handleTelegramUpdate(update: Update, now = new Date()): Pr
   let reply: string;
   if (text.startsWith("/start")) {
     const token = text.split(/\s+/)[1] ?? "";
-    reply = await start(token, chatId, message?.from?.username ?? null, now);
+    reply = await start(token, chatId, message?.from?.username ?? null, now, bot);
   } else if (text === "/stop") {
-    const tenants = await poolMany<{ tenant_id: string }>("SELECT tenant_id FROM telegram_chat_lookup($1)", [chatId]);
-    for (const row of tenants) await asOnline(row.tenant_id, (ctx) => unbindTelegram(ctx, chatId), now);
-    reply = tenants.length ? "Готово, больше не будем писать сюда. Вернуться можно по новой ссылке от салона." : "Этот чат и так ни к чему не подключён.";
+    const tenants = await chatTenants(chatId, bot);
+    let unlinked = 0;
+    for (const row of tenants) unlinked += await asOnline(row.tenant_id, (ctx) => unbindTelegram(ctx, chatId, Boolean(bot)), now);
+    reply = unlinked ? "Готово, больше не будем писать сюда. Вернуться можно по новой ссылке от салона." : "Этот чат и так ни к чему не подключён.";
   } else {
     reply = "Я присылаю напоминания о записях. Чтобы ответить салону, позвоните или напишите администратору.";
   }
-  await telegramSend(chatId, reply);
+  await telegramSend(chatId, reply, undefined, bot?.token);
   return { ok: true, reply };
 }
 
-async function start(token: string, chatId: string, username: string | null, now: Date) {
+async function start(token: string, chatId: string, username: string | null, now: Date, bot?: OwnBot) {
   if (!/^[a-f0-9]{32}$/.test(token)) return "Откройте бота по ссылке от салона, чтобы получать напоминания.";
   const row = await poolOne<{ tenant_id: string }>("SELECT tenant_id FROM telegram_token_lookup($1)", [sha256(token)]);
-  if (!row) return "Ссылка устарела. Попросите салон прислать новую.";
-  return asOnline(row.tenant_id, (ctx) => bindTelegram(ctx, token, { chatId, username }), now);
+  if (!row || (bot && row.tenant_id !== bot.tenantId)) return "Ссылка устарела. Попросите салон прислать новую.";
+  return asOnline(row.tenant_id, (ctx) => bindTelegram(ctx, token, { chatId, username }, Boolean(bot)), now);
 }
 
-async function handleCallback(query: NonNullable<Update["callback_query"]>, now: Date): Promise<{ ok: true; reply?: string }> {
+async function handleCallback(query: NonNullable<Update["callback_query"]>, now: Date, bot?: OwnBot): Promise<{ ok: true; reply?: string }> {
   const chatId = query.message?.chat?.id != null ? String(query.message.chat.id) : null;
   const match = /^([cx]):([0-9a-f-]{36})$/.exec(query.data ?? "");
   let reply = "Кнопка устарела";
   if (chatId && match) {
     const [, action, appointmentId] = match;
-    const tenants = await poolMany<{ tenant_id: string }>("SELECT tenant_id FROM telegram_chat_lookup($1)", [chatId]);
+    const tenants = await chatTenants(chatId, bot);
     for (const { tenant_id } of tenants) {
       const result = await asOnline(tenant_id, async (ctx) => {
         // Only the client this chat is linked to may answer for the visit.
         const owned = await one<{ id: string }>(
           ctx.db,
           `SELECT a.id FROM appointments a JOIN telegram_links l ON l.client_id = a.client_id
-           WHERE a.id = $1 AND l.chat_id = $2`,
-          [appointmentId, chatId],
+           WHERE a.id = $1 AND l.chat_id = $2 AND l.own_bot = $3`,
+          [appointmentId, chatId, Boolean(bot)],
         );
         if (!owned) return null;
         try {
@@ -90,7 +111,7 @@ async function handleCallback(query: NonNullable<Update["callback_query"]>, now:
       }
     }
   }
-  if (query.id) await telegramAnswer(query.id, reply.length <= 200 ? reply : undefined);
-  if (chatId) await telegramSend(chatId, reply);
+  if (query.id) await telegramAnswer(query.id, reply.length <= 200 ? reply : undefined, bot?.token);
+  if (chatId) await telegramSend(chatId, reply, undefined, bot?.token);
   return { ok: true, reply };
 }

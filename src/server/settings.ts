@@ -143,10 +143,10 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
   if (input.fiscalVat !== undefined && !["none", "vat0", "vat5", "vat7", "vat10", "vat20"].includes(String(input.fiscalVat))) {
     throw new AppError("VALIDATION", "Неизвестная ставка НДС");
   }
-  if (input.fiscalProvider !== undefined && !fiscalProviders().some((provider) => provider.name === input.fiscalProvider)) {
+  if (input.fiscalProvider !== undefined && !(await fiscalProviders(ctx)).some((provider) => provider.name === input.fiscalProvider)) {
     throw new AppError("VALIDATION", "Такой онлайн-кассы нет");
   }
-  if (input.acquiringProvider !== undefined && !acquiringProviders().some((provider) => provider.name === input.acquiringProvider)) {
+  if (input.acquiringProvider !== undefined && !(await acquiringProviders(ctx)).some((provider) => provider.name === input.acquiringProvider)) {
     throw new AppError("VALIDATION", "Такого провайдера оплаты нет");
   }
   // One source of receipts: either the CRM's online kassa or the salon's own one.

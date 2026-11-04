@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 import { MessagingSettings } from "./messaging-settings";
+import { IntegrationsSettings } from "./integrations-settings";
 
 type Branch = {
   id: string;
@@ -86,6 +87,7 @@ export function SettingsView() {
         <div className="field"><label>Неявка после, минут</label><input type="number" value={branch.noShowGraceMin} onChange={(event) => set("noShowGraceMin", Number(event.target.value))} /></div>
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
+      {(role === "owner" || role === "super") && <IntegrationsSettings />}
       <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
       <MessagingSettings branch={branch} role={role} onSaved={setBranch} />
@@ -249,7 +251,7 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
       </div>
       {draft.fiscalEnabled && sandbox && (
         <div className="tag tag-warn" style={{ alignSelf: "flex-start", whiteSpace: "normal" }}>
-          Подключён тестовый режим: чеки не уходят в ФНС, деньги не списываются. Боевой провайдер подключается, когда будут договор и ключи.
+          Подключён тестовый режим: чеки не уходят в ФНС, деньги не списываются. Свою кассу и эквайринг подключите в «Интеграциях» выше и выберите здесь.
         </div>
       )}
       {draft.fiscalEnabled && (<>

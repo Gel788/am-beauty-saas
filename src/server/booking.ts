@@ -480,7 +480,7 @@ export async function confirmBooking(
     promo: promo ? { code: promo.code, discountMinor: promo.discountMinor } : null,
     clientName: name,
     cancelToken: token,
-    telegramUrl: telegramConfigured() ? (await issueTelegramLink(ctx, { clientId: client.id })).url : null,
+    telegramUrl: (await telegramConfigured(ctx)) ? (await issueTelegramLink(ctx, { clientId: client.id })).url : null,
     cancelUntil: cancelUntil.toISOString(),
     branch: presentBranch(branch),
   };
