@@ -1,4 +1,5 @@
 import { createBranch, currentBranchId, networkSummary, orderByCurrent, setCurrentBranch } from "@/server/network";
+import { assertWritable, billingSummary, createInvoice, handleBillingWebhook, isPlatformAdmin, platformTenants, platformUpdateTenant, sandboxPayInvoice, tenantAccess } from "@/server/billing";
 import { pool } from "@/server/db";
 import { pushPublicKey, pushStatus, sendTestPush, subscribePush, unsubscribePush } from "@/server/push";
 import { clientCalls, handleTelephonyWebhook, liveCalls, recentCalls } from "@/server/telephony";
@@ -24,7 +25,7 @@ import {
   updateRetentionSettings,
 } from "@/server/retention";
 import { NextRequest, NextResponse } from "next/server";
-import { isAppError } from "@/domain/errors";
+import { AppError, isAppError } from "@/domain/errors";
 import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
 import {
   cancelAppointment,
@@ -207,6 +208,8 @@ function fail(error: unknown) {
       NOT_FOUND: 404,
       STALE: 409,
       SOFT_CONFIRM: 409,
+      PLAN_LIMIT: 402,
+      PAYMENT_REQUIRED: 402,
     }[error.code];
     return NextResponse.json({ error: { code: error.code, message: error.message, details: error.details ?? null } }, { status });
   }
@@ -363,6 +366,10 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json({ ok: true });
   }
 
+  if (key === "POST webhooks/billing/yookassa") {
+    return NextResponse.json(await handleBillingWebhook(await readJson(request), request.headers));
+  }
+
   if (key === "POST webhooks/telegram") {
     if (!telegramSecretOk(request.headers.get("x-telegram-bot-api-secret-token"))) {
       return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
@@ -381,10 +388,26 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Нужно войти" } }, { status: 401 });
   }
 
+  const access = await tenantAccess(actor.tenantId);
   if (key === "GET auth/me") {
     const branches = orderByCurrent(await asActor(actor, (ctx) => listBranches(ctx)), await currentBranchId(actor.userId));
     const density = await getDensity(actor.userId);
-    return NextResponse.json({ actor, branches, density });
+    const billing = { state: access.state, daysLeft: "daysLeft" in access ? access.daysLeft : null, readOnly: access.readOnly };
+    return NextResponse.json({ actor, branches, density, billing, platformAdmin: isPlatformAdmin(actor) });
+  }
+  // PLAT-BILLING-01: after the subscription ends the CRM stays readable; only paying and signing out still write.
+  if (method !== "GET" && !["billing", "auth", "preferences", "platform", "push"].includes(parts[0])) assertWritable(access);
+  if (key === "GET billing") return NextResponse.json(await asActor(actor, (ctx) => billingSummary(ctx)));
+  if (key === "POST billing/invoices") {
+    const body = await readJson(request);
+    return NextResponse.json(await asActor(actor, (ctx) => createInvoice(ctx, body)), { status: 201 });
+  }
+  if (method === "POST" && parts[0] === "billing" && parts[1] === "invoices" && parts[2] && parts[3] === "sandbox-pay") {
+    return NextResponse.json(await asActor(actor, (ctx) => sandboxPayInvoice(ctx, parts[2])));
+  }
+  if (key === "GET platform/tenants") return NextResponse.json(await platformTenants(actor));
+  if (method === "PATCH" && parts[0] === "platform" && parts[1] === "tenants" && parts[2]) {
+    return NextResponse.json(await platformUpdateTenant(actor, parts[2], await readJson(request)));
   }
   if (key === "PUT preferences") {
     const body = await readJson(request);
@@ -1192,6 +1215,7 @@ async function handlePublic(request: NextRequest, parts: string[]) {
       );
     }
     if (method === "POST" && action === "holds") {
+      if ((await tenantAccess(tenantId)).readOnly) throw new AppError("FORBIDDEN", "Онлайн-запись временно недоступна. Позвоните в салон");
       const body = await readJson(request);
       return NextResponse.json(
         await asOnline(tenantId, (ctx) =>

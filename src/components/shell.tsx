@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { Banknote, BarChart3, Network, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Building2, CreditCard, Network, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor } from "./portraits";
 import { BranchSwitcher } from "./network";
@@ -12,10 +12,13 @@ import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
 import { AppDevice } from "./pwa";
 import { CallPopup } from "./calls";
+import { BillingBanner } from "./billing-view";
 
 type Me = {
   actor: { name: string; role: string };
   branches: { id: string; name: string; address: string; timezone: string }[];
+  billing?: { state: string; daysLeft: number | null; readOnly: boolean };
+  platformAdmin?: boolean;
 };
 
 const DESK = ["owner", "admin", "super"];
@@ -36,6 +39,7 @@ const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: s
   { href: "/reports", label: "Отчёты", icon: BarChart3, roles: [...DESK, "accountant", "master"], masterLabel: "Мои показатели" },
   { href: "/payroll", label: "Зарплаты", icon: Banknote, roles: [...DESK, "accountant", "master"], masterLabel: "Моя зарплата" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: DESK },
+  { href: "/settings/billing", label: "Подписка", icon: CreditCard, roles: ["owner"] },
 ];
 
 const ROLES: Record<string, string> = {
@@ -87,7 +91,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {LINKS.filter((link) => (!me || link.roles.includes(me.actor.role)) && (!link.multi || (me?.branches.length ?? 0) > 1)).map((link) => {
               const Icon = link.icon;
               const label = me?.actor.role === "master" && link.masterLabel ? link.masterLabel : link.label;
-              const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && pathname.startsWith(link.href));
+              const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && link.href !== "/settings" && pathname.startsWith(link.href));
               const calendarActive = link.href === "/journal" && pathname.startsWith("/journal") && link.label === "Календарь";
               return (
                 <Link key={link.label} href={link.href} className={`nav-item ${active || calendarActive ? "active" : ""}`}>
@@ -97,6 +101,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+            {me?.platformAdmin && (
+              <Link href="/platform" className={`nav-item ${pathname.startsWith("/platform") ? "active" : ""}`}><Building2 />Платформа</Link>
+            )}
           </nav>
           {me && (DESK.includes(me.actor.role) || me.actor.role === "accountant") && <Notifications />}
           <div className="side-grow" />
@@ -125,6 +132,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </aside>
         <div className="stage-main">
           {offline && <div className="banner">Нет сети. Сохранение заблокировано, пока связь не вернётся.</div>}
+          {me && <BillingBanner billing={me.billing} role={me.actor.role} />}
           {children}
         </div>
       </div>
