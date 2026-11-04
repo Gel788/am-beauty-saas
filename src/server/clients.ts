@@ -4,6 +4,7 @@ import { audit } from "./audit";
 import { assertRole } from "./access";
 import { many, one } from "./db";
 import { clearAppointmentDebt } from "./payments";
+import { validateCustom } from "./custom-fields";
 import type { Ctx } from "./types";
 
 export type ClientDto = {
@@ -23,6 +24,8 @@ export type ClientDto = {
   /** History carried over from the previous system (import). */
   imported: { visits: number; lastVisit: string | null; revenueMinor: number } | null;
   mergedIntoId: string | null;
+  /** CF-*: values of the salon's own client fields, by key. */
+  custom: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -43,6 +46,7 @@ type ClientRow = {
   imported_last_visit?: Date | string | null;
   imported_revenue_minor?: number | string;
   merged_into_id?: string | null;
+  custom?: Record<string, unknown> | null;
 };
 
 function dateOnly(value: Date | string | null): string | null {
@@ -92,6 +96,7 @@ async function hydrate(ctx: Ctx, row: ClientRow): Promise<ClientDto> {
         ? { visits: Number(row.imported_visits ?? 0), lastVisit: dateOnly(row.imported_last_visit ?? null), revenueMinor: Number(row.imported_revenue_minor ?? 0) }
         : null,
     mergedIntoId: row.merged_into_id ?? null,
+    custom: row.custom ?? {},
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -119,6 +124,7 @@ export async function createClient(
     source?: string;
     tags?: string[];
     birthDate?: string | null;
+    custom?: Record<string, unknown>;
   },
 ): Promise<ClientDto> {
   assertRole(ctx, ["owner", "admin", "master"]);
@@ -139,11 +145,12 @@ export async function createClient(
     }
   }
   const email = normalizeEmail(input.email);
+  const custom = await validateCustom(ctx, "client", input.custom, {}, ctx.channel === "online" ? "online" : "desk");
   const id = crypto.randomUUID();
   await ctx.db.query(
-    `INSERT INTO clients (id, tenant_id, name, email, notes, source, birth_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, ctx.actor.tenantId, name, email, input.notes?.trim() ?? "", input.source?.trim() || "walk-in", input.birthDate || null],
+    `INSERT INTO clients (id, tenant_id, name, email, notes, source, birth_date, custom)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, ctx.actor.tenantId, name, email, input.notes?.trim() ?? "", input.source?.trim() || "walk-in", input.birthDate || null, JSON.stringify(custom)],
   );
   for (let i = 0; i < phones.length; i += 1) {
     await ctx.db.query(
@@ -185,6 +192,7 @@ export async function updateClient(
     source?: string;
     tags?: string[];
     birthDate?: string | null;
+    custom?: Record<string, unknown>;
   },
 ): Promise<ClientDto> {
   assertRole(ctx, ["owner", "admin", "master"]);
@@ -230,9 +238,10 @@ export async function updateClient(
       ]);
     }
   }
+  const custom = await validateCustom(ctx, "client", input.custom, current.custom ?? {});
   await ctx.db.query(
     `UPDATE clients
-     SET name = $2, email = $3, notes = $4, source = $5, birth_date = $6,
+     SET name = $2, email = $3, notes = $4, source = $5, birth_date = $6, custom = $7,
          version = version + 1, updated_at = now()
      WHERE id = $1`,
     [
@@ -242,6 +251,7 @@ export async function updateClient(
       input.notes !== undefined ? input.notes : current.notes,
       input.source ?? current.source,
       input.birthDate !== undefined ? input.birthDate || null : dateOnly(current.birth_date),
+      JSON.stringify(custom),
     ],
   );
   await audit(ctx, {
@@ -329,8 +339,9 @@ export async function searchClients(ctx: Ctx, query: string): Promise<ClientDto[
   return result;
 }
 
-export async function listClients(ctx: Ctx, query = ""): Promise<ClientDto[]> {
-  if (query.trim()) return searchClients(ctx, query);
+/** CF-FILTER-01: `field` + `value` narrows the list to clients whose custom field matches. */
+export async function listClients(ctx: Ctx, query = "", filter?: { field: string; value: string }): Promise<ClientDto[]> {
+  if (query.trim() && !filter) return searchClients(ctx, query);
   assertRole(ctx, ["owner", "admin", "master"]);
   const rows = await many<ClientRow>(
     ctx.db,
@@ -339,8 +350,11 @@ export async function listClients(ctx: Ctx, query = ""): Promise<ClientDto[]> {
         (SELECT max(a.starts_at) FROM appointments a WHERE a.client_id = c.id) AS last_visit_at
      FROM clients c
      WHERE c.deleted_at IS NULL
+       AND ($1::text IS NULL OR c.custom->>$1 = $2 OR (jsonb_typeof(c.custom->$1) = 'array' AND c.custom->$1 ? $2))
+       AND ($3::text = '' OR c.name ILIKE '%' || $3 || '%')
      ORDER BY c.name
      LIMIT 200`,
+    [filter?.field ?? null, filter?.value ?? "", query.trim()],
   );
   const result: ClientDto[] = [];
   for (const row of rows) result.push(await hydrate(ctx, row));

@@ -5,6 +5,7 @@ import { audit } from "./audit";
 import { many, pool, withSession } from "./db";
 import { createHash, randomBytes } from "node:crypto";
 import { appointmentValues, deliverToClient, publicUrl, render, templateBody } from "./messaging";
+import { sendGroupReminders } from "./groups";
 import type { Actor, BranchRow, Ctx } from "./types";
 
 /** The reminder job acts under this fixed id, like the online channel. */
@@ -61,6 +62,12 @@ export async function sendDueReminders(ctx: Ctx) {
        FOR UPDATE OF a SKIP LOCKED`,
       [branch.id, ctx.now.toISOString(), Number(branch.reminder_hours)],
     );
+    // GRP-REMIND-01: group events go out in the same window and also wait out quiet hours.
+    if (!inQuietHours(ctx.now, branch)) {
+      const groups = await sendGroupReminders(ctx, branch);
+      result.sent += groups.sent;
+      result.failed += groups.failed;
+    }
     if (!due.length) continue;
     // Edge: never in quiet hours. The job runs again later and the appointments are still due.
     if (inQuietHours(ctx.now, branch)) {

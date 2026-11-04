@@ -624,7 +624,7 @@ export async function rebookAppointment(ctx: Ctx, id: string, input: { days?: un
         return { appointment: created, exact: day === 0 && shift === 0 };
       } catch (error) {
         await ctx.db.query("ROLLBACK TO SAVEPOINT rebook_try");
-        if (!isAppError(error) || !["CONFLICT_SLOT", "SOFT_CONFIRM", "VALIDATION"].includes(error.code)) throw error;
+        if (!isAppError(error) || !["CONFLICT_SLOT", "CONFLICT_RESOURCE", "SOFT_CONFIRM", "VALIDATION"].includes(error.code)) throw error;
         lastError = error;
       }
     }

@@ -20,10 +20,14 @@ import { LIVE_PAYMENT, NET_AMOUNT, clearAppointmentDebt, syncAppointmentDebt } f
 import type { BranchRow, Ctx } from "./types";
 import { consumeForAppointment } from "./inventory";
 import { releasePromo } from "./loyalty";
+import { listResources, planResources, resourceDay, resourcesOf, writeResources } from "./resources";
+import { describeCustom, listFields, renderValue, validateCustom } from "./custom-fields";
+import { groupDay } from "./groups";
 
 type ServiceInput = { serviceId: string; durationMin?: number };
 
 type ApptRow = {
+  custom: Record<string, unknown> | null;
   id: string;
   branch_id: string;
   staff_id: string;
@@ -316,6 +320,10 @@ export async function createAppointment(
     acknowledgeSoft?: boolean;
     forceOverlap?: boolean;
     overlapReason?: string;
+    /** RES-LINK-01: the desk's pick; otherwise free resources are chosen automatically. */
+    resourceIds?: string[];
+    /** CF-VAL-01: values of the visit's custom fields. */
+    custom?: Record<string, unknown>;
   },
 ) {
   const branch = await loadBranch(ctx, input.branchId);
@@ -355,7 +363,9 @@ export async function createAppointment(
   assertSameDay(starts, ends, branch.timezone);
   const overlaps = await findOverlaps(ctx, input.staffId, starts, ends);
   const forced = assertSlot(overlaps, input.branchId, input.forceOverlap, input.overlapReason, isAdminPlus(ctx.actor));
-  await assertHours(ctx, branch, input.staffId, starts, ends, input.acknowledgeSoft);
+  const plan = await planResources(ctx, { branchId: input.branchId, serviceIds: lines.map((line) => line.serviceId), starts, ends, timeZone: branch.timezone, preferred: input.resourceIds });
+  await assertHours(ctx, branch, input.staffId, starts, ends, input.acknowledgeSoft, plan.warnings);
+  const custom = await validateCustom(ctx, "appointment", input.custom, {}, online ? "online" : "desk");
   const source = input.source ?? (ctx.actor.role === "master" ? "master" : "admin");
   if (source === "online" && !online && !isAdminPlus(ctx.actor)) {
     throw new AppError("FORBIDDEN", "Недостаточно прав");
@@ -366,8 +376,8 @@ export async function createAppointment(
     `INSERT INTO appointments (
        id, tenant_id, branch_id, staff_id, client_id, booked_by_client_id, starts_at, ends_at,
        branch_tz, tz_offset_min, status, comment, source, color, force_overlap, overlap_reason,
-       created_by, updated_by
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'scheduled',$11,$12,$13,$14,$15,$16,$16)`,
+       created_by, updated_by, custom
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'scheduled',$11,$12,$13,$14,$15,$16,$16,$17)`,
     [
       id,
       ctx.actor.tenantId,
@@ -385,9 +395,11 @@ export async function createAppointment(
       forced,
       forced ? input.overlapReason?.trim() : null,
       ctx.actor.userId,
+      JSON.stringify(custom),
     ],
   );
   await writeLines(ctx, id, lines);
+  await writeResources(ctx, id, plan.resourceIds);
   await audit(ctx, {
     branchId: input.branchId,
     entity: "appointment",
@@ -451,6 +463,9 @@ export async function getAppointment(ctx: Ctx, id: string) {
     priceMinor: price,
     paidMinor: paid,
     promo: promo ? { code: promo.code, discountMinor: Number(promo.discount_minor) } : null,
+    resources: await resourcesOf(ctx, id),
+    custom: row.custom ?? {},
+    customView: await describeCustom(ctx, "appointment", row.custom),
     actions: statusActions(row, ctx, branch),
     history: await listAudit(ctx, "appointment", id),
   };
@@ -536,6 +551,8 @@ export async function updateAppointment(
     forceOverlap?: boolean;
     overlapReason?: string;
     refreshPrice?: boolean;
+    resourceIds?: string[];
+    custom?: Record<string, unknown>;
   },
 ) {
   const row = await loadRow(ctx, id, true);
@@ -577,12 +594,14 @@ export async function updateAppointment(
   assertSameDay(starts, ends, branch.timezone);
   const overlaps = await findOverlaps(ctx, staffId, starts, ends, id);
   const forced = assertSlot(overlaps, row.branch_id, input.forceOverlap, input.overlapReason, isAdminPlus(ctx.actor));
-  await assertHours(ctx, branch, staffId, starts, ends, input.acknowledgeSoft);
+  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds: lines.map((line) => line.serviceId), starts, ends, timeZone: branch.timezone, preferred: input.resourceIds });
+  await assertHours(ctx, branch, staffId, starts, ends, input.acknowledgeSoft, plan.warnings);
+  const custom = await validateCustom(ctx, "appointment", input.custom, row.custom ?? {});
   await ctx.db.query(
     `UPDATE appointments SET
        staff_id = $2, client_id = $3, booked_by_client_id = $4, starts_at = $5, ends_at = $6,
        comment = $7, color = $8, force_overlap = $9, overlap_reason = $10,
-       version = version + 1, updated_by = $11, updated_at = now()
+       version = version + 1, updated_by = $11, updated_at = now(), custom = $12
      WHERE id = $1`,
     [
       id,
@@ -596,9 +615,11 @@ export async function updateAppointment(
       forced,
       forced ? input.overlapReason?.trim() ?? row.overlap_reason : null,
       ctx.actor.userId,
+      JSON.stringify(custom),
     ],
   );
   if (input.services) await writeLines(ctx, id, lines);
+  await writeResources(ctx, id, plan.resourceIds);
   const debt = await syncAppointmentDebt(ctx, id);
   await audit(ctx, {
     branchId: row.branch_id,
@@ -662,8 +683,10 @@ export async function moveAppointment(
   assertSameDay(starts, ends, branch.timezone);
   const overlaps = await findOverlaps(ctx, staffId, starts, ends, id);
   const forced = assertSlot(overlaps, row.branch_id, input.forceOverlap, input.overlapReason, isAdminPlus(ctx.actor));
-  const extra = row.status === "in_progress" ? ["IN_PROGRESS"] : [];
+  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds: lines.flatMap((line) => (line.serviceId ? [line.serviceId] : [])), starts, ends, timeZone: branch.timezone });
+  const extra = [...(row.status === "in_progress" ? ["IN_PROGRESS"] : []), ...plan.warnings];
   await assertHours(ctx, branch, staffId, starts, ends, input.acknowledgeSoft, extra);
+  await writeResources(ctx, id, plan.resourceIds);
   await ctx.db.query(
     `UPDATE appointments SET staff_id = $2, starts_at = $3, ends_at = $4, force_overlap = $5, overlap_reason = $6,
        version = version + 1, updated_by = $7, updated_at = now()
@@ -715,7 +738,9 @@ export async function resizeAppointment(
   await lockStaff(ctx, row.staff_id);
   const overlaps = await findOverlaps(ctx, row.staff_id, starts, ends, id);
   assertSlot(overlaps, row.branch_id, false, undefined, false);
-  await assertHours(ctx, branch, row.staff_id, starts, ends, input.acknowledgeSoft);
+  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds: lines.flatMap((line) => (line.serviceId ? [line.serviceId] : [])), starts, ends, timeZone: branch.timezone });
+  await assertHours(ctx, branch, row.staff_id, starts, ends, input.acknowledgeSoft, plan.warnings);
+  await writeResources(ctx, id, plan.resourceIds);
   await ctx.db.query("UPDATE appointment_services SET duration_min = duration_min + $2 WHERE id = $1", [last.id, deltaMin]);
   await ctx.db.query(
     `UPDATE appointments SET ends_at = $2, version = version + 1, updated_by = $3, updated_at = now() WHERE id = $1`,
@@ -848,6 +873,9 @@ export async function restoreAppointment(ctx: Ctx, id: string, version: number) 
     const suggestion = await suggestSlot(ctx, branch, row.staff_id, new Date(row.ends_at), duration);
     throw new AppError("CONFLICT_SLOT", "Слот занят", { conflicts: overlaps, suggestion });
   }
+  const restoredLines = await linesOf(ctx, id);
+  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds: restoredLines.flatMap((line) => (line.serviceId ? [line.serviceId] : [])), starts: new Date(row.starts_at), ends: new Date(row.ends_at), timeZone: branch.timezone });
+  await writeResources(ctx, id, plan.resourceIds);
   await ctx.db.query(
     `UPDATE appointments SET status = 'scheduled', cancel_reason = NULL, cancelled_by = NULL,
        version = version + 1, updated_by = $2, updated_at = now()
@@ -932,10 +960,11 @@ export async function getJournal(
     version: number;
     force_overlap: boolean;
     debt_minor: number;
+    custom: Record<string, unknown> | null;
   }>(
     ctx.db,
     `SELECT a.id, a.staff_id, a.client_id, c.name AS client_name, a.booked_by_client_id, a.starts_at, a.ends_at,
-            a.status, a.comment, a.source, a.color, a.version, a.force_overlap, a.debt_minor
+            a.status, a.comment, a.source, a.color, a.version, a.force_overlap, a.debt_minor, a.custom
      FROM appointments a
      LEFT JOIN clients c ON c.id = a.client_id
      WHERE a.branch_id = $1 AND a.starts_at < $3 AND a.ends_at > $2
@@ -974,6 +1003,16 @@ export async function getJournal(
     });
   }
   const columnIds = new Set(columns.map((column) => column.id));
+  // RES-VIEW-01 and GRP: the day's resources, who holds them, and group events.
+  const resources = await listResources(ctx, input.branchId);
+  const holds = await resourceDay(ctx, input.branchId, range.start, range.end);
+  const groups = (await groupDay(ctx, input.branchId, range.start, range.end)).map((event) => ({
+    ...event,
+    startMin: localMinutes(new Date(event.startsAt), branch.timezone),
+    endMin: localMinutes(new Date(event.endsAt), branch.timezone) || 24 * 60,
+  }));
+  // CF-JOURNAL-01: one custom field may show as a muted line on the block.
+  const journalField = (await listFields(ctx, "appointment")).find((field) => field.showInJournal) ?? null;
   const appointments = [];
   for (const row of apptRows) {
     if (!columnIds.has(row.staff_id)) continue;
@@ -1002,6 +1041,9 @@ export async function getJournal(
       services: services.map((line) => ({ id: line.id, serviceId: line.serviceId, title: line.title, durationMin: line.durationMin, priceMinor: line.priceMinor })),
       priceMinor: price,
       paidMinor: paid,
+      resourceIds: holds.filter((hold) => hold.appointment_id === row.id).map((hold) => hold.resource_id),
+      custom: row.custom ?? {},
+      note: journalField && row.custom?.[journalField.key] !== undefined ? renderValue(journalField, row.custom[journalField.key]) : null,
     });
   }
   const activeAppts = appointments.filter((row) => row.status !== "cancelled");
@@ -1020,7 +1062,7 @@ export async function getJournal(
       maxEnd = Math.max(maxEnd, interval.endMin);
     }
   }
-  for (const row of appointments) {
+  for (const row of [...appointments, ...groups]) {
     minStart = Math.min(minStart, row.startMin);
     maxEnd = Math.max(maxEnd, row.endMin);
   }
@@ -1053,6 +1095,8 @@ export async function getJournal(
     dayEndMin: Math.max(dayEndMin, dayStartMin + 8 * 60),
     staff: columns,
     appointments,
+    resources,
+    groups: groups.filter((event) => !event.staffId || columnIds.has(event.staffId) || isAdminPlus(ctx.actor)),
     stats: {
       expectedRevenueMinor: expected,
       loadPercent: workCapacity > 0 ? Math.round((booked / workCapacity) * 100) : 0,
@@ -1154,7 +1198,9 @@ export async function exportAppointmentsCsv(
     if (input.status && row.status !== input.status) return false;
     return true;
   });
-  const header = ["date", "start", "end", "staff", "client", "services", "status", "price_minor", "paid_minor", "source"];
+  // CF-EXPORT-01: each active visit field becomes a cf_<key> column.
+  const fields = await listFields(ctx, "appointment");
+  const header = ["date", "start", "end", "staff", "client", "services", "status", "price_minor", "paid_minor", "source", ...fields.map((field) => `cf_${field.key}`)];
   const staffName = new Map(journal.staff.map((staff) => [staff.id, staff.name]));
   const lines = [header.join(",")];
   for (const row of rows) {
@@ -1170,6 +1216,7 @@ export async function exportAppointmentsCsv(
         String(row.priceMinor),
         String(row.paidMinor),
         row.source,
+        ...fields.map((field) => renderValue(field, row.custom[field.key])),
       ]
         .map(csvCell)
         .join(","),

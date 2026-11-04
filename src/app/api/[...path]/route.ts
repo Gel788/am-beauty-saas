@@ -162,6 +162,8 @@ import {
   releaseHold,
   resolveBookingToken,
   resolvePublicBranch,
+  findOrCreateClient,
+  loadOnlineBranch,
 } from "@/server/booking";
 import { listBranches, updateBranch, updateTenantSlug } from "@/server/settings";
 import {
@@ -178,6 +180,9 @@ import {
   updateMessagingSettings,
 } from "@/server/messaging";
 import { handleTelegramUpdate, ownBotFor, telegramSecretOk } from "@/server/telegram-bot";
+import { deleteResource, listResources, resourceOptions, saveResource } from "@/server/resources";
+import { listFields, saveField } from "@/server/custom-fields";
+import { cancelEvent, completeEvent, enroll, enrollOnline, getEvent, groupStats, listEvents, markArrived, paySeat, saveEvent, setParticipantStatus } from "@/server/groups";
 import { checkIntegration, deleteIntegration, listIntegrations, saveIntegration } from "@/server/integrations";
 import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
 import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
@@ -193,6 +198,7 @@ function fail(error: unknown) {
       FORBIDDEN: 403,
       VALIDATION: 400,
       CONFLICT_SLOT: 409,
+      CONFLICT_RESOURCE: 409,
       SHIFT_REQUIRED: 409,
       SHIFT_CLOSED: 409,
       NOT_FOUND: 404,
@@ -764,7 +770,97 @@ async function handle(request: NextRequest, parts: string[]) {
       ),
     );
   }
-  if (key === "GET clients") return NextResponse.json(await run((ctx) => listClients(ctx, url.searchParams.get("q") ?? "")));
+  if (key === "GET clients") {
+    const field = url.searchParams.get("field");
+    return NextResponse.json(await run((ctx) => listClients(ctx, url.searchParams.get("q") ?? "", field ? { field, value: url.searchParams.get("value") ?? "" } : undefined)));
+  }
+
+  // ---------------------------------------------------------------- Resources (RES-*)
+  if (key === "GET resources") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(await run((ctx) => listResources(ctx, branchId, { includeInactive: url.searchParams.get("all") === "1" })));
+  }
+  if (key === "GET resources/options") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(
+      await run((ctx) =>
+        resourceOptions(ctx, {
+          branchId,
+          appointmentId: url.searchParams.get("appointmentId") || undefined,
+          serviceIds: (url.searchParams.get("serviceIds") ?? "").split(",").filter(Boolean),
+          startsAt: url.searchParams.get("startsAt") ?? "",
+          durationMin: Number(url.searchParams.get("durationMin") ?? 60),
+        }),
+      ),
+    );
+  }
+  if (key === "POST resources") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
+    return NextResponse.json(await run((ctx) => saveResource(ctx, { ...body, branchId })));
+  }
+  if (parts[0] === "resources" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
+    return NextResponse.json(await run((ctx) => saveResource(ctx, { ...body, id: parts[1], branchId })));
+  }
+  if (parts[0] === "resources" && parts[1] && !parts[2] && method === "DELETE") return NextResponse.json(await run((ctx) => deleteResource(ctx, parts[1])));
+
+  // ---------------------------------------------------------------- Custom fields (CF-*)
+  if (key === "GET fields") {
+    const entity = url.searchParams.get("entity");
+    return NextResponse.json(await run((ctx) => listFields(ctx, entity === "client" || entity === "appointment" ? entity : undefined, { includeInactive: url.searchParams.get("all") === "1" })));
+  }
+  if (key === "POST fields") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => saveField(ctx, body)));
+  }
+  if (parts[0] === "fields" && parts[1] && !parts[2] && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => saveField(ctx, { ...body, id: parts[1] })));
+  }
+
+  // ---------------------------------------------------------------- Group events (GRP-*)
+  if (key === "GET groups" || key === "GET groups/stats") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    const today = new Date().toISOString().slice(0, 10);
+    const range = { branchId, from: url.searchParams.get("from") || today, to: url.searchParams.get("to") || url.searchParams.get("from") || today };
+    if (key === "GET groups") return NextResponse.json(await run((ctx) => listEvents(ctx, range)));
+    return NextResponse.json(await run((ctx) => groupStats(ctx, range)));
+  }
+  if (key === "POST groups") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
+    return NextResponse.json(await run((ctx) => saveEvent(ctx, null, { ...body, branchId, acknowledgeSoft: body.acknowledgeSoft === true })));
+  }
+  if (parts[0] === "groups" && parts[1] === "participants" && parts[2] && parts[3] === "status" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => setParticipantStatus(ctx, parts[2], String(body.status) as never)));
+  }
+  if (parts[0] === "groups" && parts[1] === "participants" && parts[2] && parts[3] === "pay" && method === "POST") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => paySeat(ctx, parts[2], { tenders: (body.tenders ?? []) as never, bypassShift: body.bypassShift === true })));
+  }
+  if (parts[0] === "groups" && parts[1] && parts[1] !== "participants") {
+    if (!parts[2] && method === "GET") return NextResponse.json(await run((ctx) => getEvent(ctx, parts[1])));
+    if (!parts[2] && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => saveEvent(ctx, parts[1], { ...body, acknowledgeSoft: body.acknowledgeSoft === true })));
+    }
+    if (parts[2] === "enroll" && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => enroll(ctx, parts[1], { clientId: String(body.clientId ?? ""), waitlist: body.waitlist === true })));
+    }
+    if (parts[2] === "arrived" && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => markArrived(ctx, parts[1], Array.isArray(body.participantIds) ? body.participantIds.map(String) : [])));
+    }
+    if (parts[2] === "cancel" && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => cancelEvent(ctx, parts[1], { reason: String(body.reason ?? ""), notify: body.notify !== false })));
+    }
+    if (parts[2] === "complete" && method === "POST") return NextResponse.json(await run((ctx) => completeEvent(ctx, parts[1])));
+  }
   if (key === "POST clients") {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => createClient(ctx, body as never)));
@@ -1062,7 +1158,22 @@ async function handlePublic(request: NextRequest, parts: string[]) {
             promoCode: body.promoCode ? String(body.promoCode) : undefined,
             consent: body.consent === true,
             marketing: body.marketing === true,
+            custom: body.custom && typeof body.custom === "object" ? (body.custom as Record<string, unknown>) : undefined,
           }),
+        ),
+      );
+    }
+    if (method === "POST" && parts[3] === "groups" && parts[4] && parts[5] === "enroll" && !parts[6]) {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await asOnline(tenantId, async (ctx) =>
+          enrollOnline(ctx, await loadOnlineBranch(ctx, branchId), parts[4], {
+            name: String(body.name ?? ""),
+            phone: String(body.phone ?? ""),
+            consent: body.consent === true,
+            marketing: body.marketing === true,
+            waitlist: body.waitlist === true,
+          }, findOrCreateClient),
         ),
       );
     }

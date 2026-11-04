@@ -135,7 +135,9 @@ export async function channelCatalog(ctx: Ctx) {
 
 // ---------------------------------------------------------------- Templates
 
-export type TemplateKey = "reminder" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday";
+export type TemplateKey =
+  | "reminder" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday"
+  | "group_enrolled" | "group_reminder" | "group_cancelled" | "group_seat";
 export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
   reminder: "Напоминаем о записи в {салон}{адрес}: {когда}. {услуги}, мастер {мастер}. Подтвердите или отмените визит: {ссылка}",
   booking_created: "Вы записаны в {салон}: {когда}, {услуги}, мастер {мастер}. Управлять записью: {ссылка}",
@@ -145,6 +147,10 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
   waitlist_offer: "{имя}, освободилось время в {салон}: {когда}, мастер {мастер}. Записаться: {ссылка}",
   rebook: "{имя}, с последнего визита в {салон} прошло {дней} дн. — самое время обновить {услуги}. Записаться: {ссылка}",
   birthday: "{имя}, {салон} поздравляет вас с днём рождения! Ждём в гости: {ссылка}",
+  group_enrolled: "{имя}, вы записаны на «{услуги}» в {салон}: {когда}. Ведущий — {мастер}.",
+  group_reminder: "Напоминаем: «{услуги}» в {салон}{адрес}, {когда}. Ведущий — {мастер}. Ждём вас!",
+  group_cancelled: "{имя}, к сожалению, «{услуги}» в {салон} на {когда} отменено. Мы свяжемся с вами по поводу оплаты.",
+  group_seat: "{имя}, освободилось место на «{услуги}» в {салон}, {когда}. Вы записаны! Если планы изменились, сообщите нам.",
 };
 export const TEMPLATE_LABEL: Record<TemplateKey, string> = {
   reminder: "Напоминание о визите",
@@ -155,6 +161,10 @@ export const TEMPLATE_LABEL: Record<TemplateKey, string> = {
   waitlist_offer: "Предложение окна из листа ожидания",
   rebook: "Пора на повторный визит",
   birthday: "Поздравление с днём рождения",
+  group_enrolled: "Группа: вы записаны",
+  group_reminder: "Группа: напоминание",
+  group_cancelled: "Группа: занятие отменено",
+  group_seat: "Группа: место из листа ожидания",
 };
 export const PLACEHOLDERS = ["{имя}", "{салон}", "{адрес}", "{когда}", "{услуги}", "{мастер}", "{сумма}", "{ссылка}", "{дней}"];
 
@@ -268,7 +278,9 @@ export async function deliverToClient(
     clientId: string;
     branchId: string | null;
     appointmentId?: string | null;
-    kind: "reminder" | "manual" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday";
+    kind:
+      | "reminder" | "manual" | "booking_created" | "booking_cancelled" | "pay_link" | "review_request" | "waitlist_offer" | "rebook" | "birthday"
+      | "group_enrolled" | "group_reminder" | "group_cancelled" | "group_seat";
     body: string;
     buttons?: Button[];
     /** Unique kinds (reminder) skip silently when already logged. */

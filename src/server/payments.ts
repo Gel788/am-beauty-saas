@@ -16,7 +16,7 @@ import {
   type SaleLine,
 } from "./loyalty";
 
-type TenderInput = {
+export type TenderInput = {
   method: "cash" | "card" | "sbp" | "transfer" | "bonus" | "certificate" | "membership";
   amountMinor: number;
   certificateCode?: string;
@@ -198,6 +198,8 @@ export async function createPayment(
     receiptNo?: string;
     /** PAY-EXT-01: the bank terminal's operation code (RRN / auth code), optional. */
     terminalRef?: string;
+    /** GRP-PAY-01: a misc income that is a service (a seat at a group event), not goods. */
+    serviceLine?: boolean;
   },
 ): Promise<PaymentResult> {
   const external = externalRefs(input);
@@ -285,7 +287,7 @@ export async function createPayment(
     return { ...sale, partial: false };
   } else if (kind === "misc") {
     lines.push({
-      type: "product",
+      type: input.serviceLine ? "service" : "product",
       refId: null,
       title: input.title?.trim() || "Прочий приход",
       amountMinor: handed - tipMinor,

@@ -11,6 +11,9 @@ import {
   zonedDateTimeToUtc,
 } from "@/domain/time";
 import { createAppointment, lockStaff } from "./appointments";
+import { onlineFields, validateCustom } from "./custom-fields";
+import { publicEvents } from "./groups";
+import { resourceChecker } from "./resources";
 import { audit } from "./audit";
 import { many, one, poolOne, withSession } from "./db";
 import { loadWorkingIntervals } from "./hours";
@@ -80,7 +83,7 @@ export async function resolveBookingToken(token: string) {
   return { tenantId: row.tenant_id, appointmentId: row.appointment_id };
 }
 
-async function loadOnlineBranch(ctx: Ctx, branchId: string): Promise<OnlineBranch> {
+export async function loadOnlineBranch(ctx: Ctx, branchId: string): Promise<OnlineBranch> {
   const branch = await one<OnlineBranch>(ctx.db, "SELECT * FROM branches WHERE id = $1", [branchId]);
   if (!branch || !branch.online_enabled) throw new AppError("NOT_FOUND", "Онлайн-запись не найдена");
   return branch;
@@ -166,6 +169,8 @@ export async function publicCatalog(ctx: Ctx, branchId: string) {
       staffIds: service.staff_ids,
     })),
     staff: staff.map((row) => ({ id: row.id, name: row.display_name, color: row.color, specialties: row.specialties })),
+    fields: await onlineFields(ctx),
+    groups: await publicEvents(ctx, branch),
   };
 }
 
@@ -194,6 +199,7 @@ async function staffDaySlots(
   date: string,
   blockMin: number,
   exceptHoldId?: string,
+  serviceId?: string,
 ): Promise<number[]> {
   const today = todayInZone(branch.timezone, ctx.now);
   if (date < today || date > addCalendarDays(today, Number(branch.online_max_advance_days))) return [];
@@ -201,6 +207,8 @@ async function staffDaySlots(
   if (day.dayOff) return [];
   const range = localDayUtcRange(date, branch.timezone);
   const busy = await busyFor(ctx, staffId, range.start, range.end, exceptHoldId);
+  // RES-BOOK-01: a slot needs the room / device of the service to be free too.
+  const resourcesFree = serviceId ? await resourceChecker(ctx, branch.id, serviceId, range.start, range.end) : () => true;
   const earliest = ctx.now.getTime() + Number(branch.online_min_notice_min) * 60000;
   const step = Number(branch.online_step_min);
   const result: number[] = [];
@@ -211,6 +219,7 @@ async function staffDaySlots(
       if (startMs < earliest) continue;
       const endMs = startMs + blockMin * 60000;
       if (busy.some((item) => item.start < endMs && item.end > startMs)) continue;
+      if (!resourcesFree(startMs, startMs + blockMin * 60000)) continue;
       result.push(start);
     }
   }
@@ -247,7 +256,7 @@ export async function listSlots(
     const date = addCalendarDays(from, i);
     const byStart = new Map<number, string[]>();
     for (const member of staff) {
-      for (const start of await staffDaySlots(ctx, branch, member.id, date, block)) {
+      for (const start of await staffDaySlots(ctx, branch, member.id, date, block, undefined, service.id)) {
         byStart.set(start, [...(byStart.get(start) ?? []), member.id]);
       }
     }
@@ -294,7 +303,7 @@ export async function createHold(
   for (const member of candidates) {
     // The staff row lock serialises holds, confirms and admin edits for this master.
     await lockStaff(ctx, member.id);
-    const free = await staffDaySlots(ctx, branch, member.id, date, block);
+    const free = await staffDaySlots(ctx, branch, member.id, date, block, undefined, service.id);
     if (!free.includes(minute)) continue;
     const id = crypto.randomUUID();
     const expires = new Date(ctx.now.getTime() + Number(branch.online_hold_min) * 60000);
@@ -351,7 +360,7 @@ type HoldRow = {
   result: Record<string, unknown> | null;
 };
 
-async function findOrCreateClient(ctx: Ctx, name: string, phone: string) {
+export async function findOrCreateClient(ctx: Ctx, name: string, phone: string) {
   const existing = await one<{ id: string }>(
     ctx.db,
     `SELECT c.id FROM client_phones p JOIN clients c ON c.id = p.client_id
@@ -389,6 +398,8 @@ export async function confirmBooking(
     consent?: boolean;
     /** 38-ФЗ: separate, optional consent to promotions. */
     marketing?: boolean;
+    /** CF-ONLINE-01: answers to the salon's online fields, by key. */
+    custom?: Record<string, unknown>;
   },
 ) {
   const branch = await loadOnlineBranch(ctx, branchId);
@@ -422,6 +433,10 @@ export async function confirmBooking(
   const service = await loadOnlineService(ctx, hold.service_id);
 
   const client = await findOrCreateClient(ctx, name, phone);
+  // CF-ONLINE-01: client fields shown online are kept on the card.
+  const stored = await one<{ custom: Record<string, unknown> | null }>(ctx.db, "SELECT custom FROM clients WHERE id = $1", [client.id]);
+  const clientCustom = await validateCustom(ctx, "client", input.custom ?? {}, stored?.custom ?? {}, "online");
+  await ctx.db.query("UPDATE clients SET custom = $2 WHERE id = $1", [client.id, JSON.stringify(clientCustom)]);
   // NOSHOW-01: a client with too many no-shows is asked to call the salon.
   if (!client.created) await assertOnlineAllowed(ctx, branch, client.id);
   await ctx.db.query(
@@ -451,12 +466,15 @@ export async function confirmBooking(
       comment,
       source: "online",
       acknowledgeSoft: false,
+      custom: input.custom ?? {},
     });
   } catch (error) {
     // Schedule changed or an admin booked over the hold: the client picks another slot.
-    if (isAppError(error) && (error.code === "SOFT_CONFIRM" || error.code === "CONFLICT_SLOT")) {
+    if (isAppError(error) && (error.code === "SOFT_CONFIRM" || error.code === "CONFLICT_SLOT" || error.code === "CONFLICT_RESOURCE")) {
       throw new AppError("CONFLICT_SLOT", "Это время больше недоступно. Выберите другое", { reason: "SLOT_TAKEN" });
     }
+    // A required online field is the client's to fix, not a lost slot.
+    if (isAppError(error) && error.code === "VALIDATION" && error.details?.field) throw error;
     if (isAppError(error) && error.code === "VALIDATION") {
       throw new AppError("CONFLICT_SLOT", error.message, { reason: "SLOT_TAKEN" });
     }

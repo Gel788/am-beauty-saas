@@ -2,6 +2,7 @@ export type ErrorCode =
   | "FORBIDDEN"
   | "VALIDATION"
   | "CONFLICT_SLOT"
+  | "CONFLICT_RESOURCE"
   | "SHIFT_REQUIRED"
   | "SHIFT_CLOSED"
   | "NOT_FOUND"
