@@ -16,7 +16,7 @@ import { yookassaCheck } from "./providers/yookassa";
 import { decryptSecrets, encryptSecrets, maskSecret } from "./secrets";
 import type { Ctx } from "./types";
 
-export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring";
+export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "telephony";
 type Field = { key: string; label: string; secret?: boolean; required?: boolean; placeholder?: string; options?: { value: string; label: string }[]; hint?: string };
 type Definition = {
   provider: string;
@@ -133,6 +133,50 @@ export const INTEGRATIONS: Definition[] = [
     ],
     check: (config) => tbankCheck(config),
   },
+  {
+    provider: "zadarma",
+    kind: "telephony",
+    label: "Zadarma (Новофон)",
+    about: "Карточка клиента при входящем звонке и пропущенные звонки. Ключи — в кабинете Zadarma → «Настройки» → «Интеграции и API». Там же включите «Уведомления о звонках в АТС» и вставьте адрес ниже.",
+    docsUrl: "https://zadarma.com/ru/support/api/#api_webhooks",
+    exclusive: true,
+    fields: [
+      { key: "key", label: "Ключ API (key)", required: true },
+      { key: "secret", label: "Секрет (secret)", secret: true, required: true },
+    ],
+    async check(config) {
+      if (!/^[A-Za-z0-9]{10,64}$/.test(config.key ?? "") || !/^[A-Za-z0-9]{10,64}$/.test(config.secret ?? "")) return { ok: false, text: "Ключ и секрет — латинские буквы и цифры из кабинета Zadarma" };
+      return { ok: true, text: "Ключи сохранены. Первый звонок проверит подпись" };
+    },
+  },
+  {
+    provider: "mango",
+    kind: "telephony",
+    label: "Mango Office",
+    about: "Карточка клиента при входящем звонке и пропущенные звонки. В личном кабинете ВАТС → «Интеграции» → «API коннектор»: скопируйте уникальный код и ключ, а адрес ниже укажите как адрес внешней системы.",
+    docsUrl: "https://www.mango-office.ru/support/integratsiya-api/",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "Уникальный код АТС (vpbx_api_key)", required: true },
+      { key: "apiSalt", label: "Ключ для создания подписи (salt)", secret: true, required: true },
+    ],
+    async check(config) {
+      if (!(config.apiKey ?? "").trim() || !(config.apiSalt ?? "").trim()) return { ok: false, text: "Нужны код АТС и ключ подписи" };
+      return { ok: true, text: "Ключи сохранены. Первый звонок проверит подпись" };
+    },
+  },
+  {
+    provider: "telephony_webhook",
+    kind: "telephony",
+    label: "Другая АТС (вебхук)",
+    about: "Для любой АТС или коннектора (Albato, ApiX-Drive, Zapier): отправляйте POST с JSON {event: ringing | answered | ended | missed, callId, from, to} на адрес ниже.",
+    docsUrl: "https://albato.ru/",
+    exclusive: true,
+    fields: [],
+    async check() {
+      return { ok: true, text: "Адрес готов: отправляйте события звонков" };
+    },
+  },
 ];
 const BY_NAME = new Map(INTEGRATIONS.map((item) => [item.provider, item]));
 export function integrationDefinition(provider: string) {
@@ -151,7 +195,9 @@ type Row = {
   updated_at: Date;
 };
 
-function webhookUrl(definition: Definition, ctx: Ctx) {
+function webhookUrl(definition: Definition, ctx: Ctx, secrets: Record<string, string> = {}) {
+  if (definition.provider === "telephony_webhook") return secrets.webhookToken ? `${webhookBase()}/api/webhooks/telephony/${ctx.actor.tenantId}/telephony_webhook?token=${secrets.webhookToken}` : null;
+  if (definition.kind === "telephony") return `${webhookBase()}/api/webhooks/telephony/${ctx.actor.tenantId}/${definition.provider}`;
   if (definition.kind === "acquiring") return `${webhookBase()}/api/webhooks/acquiring/${definition.provider}`;
   if (definition.kind === "fiscal") return null;
   if (definition.kind === "telegram") return `${webhookBase()}/api/webhooks/telegram/t/${ctx.actor.tenantId}`;
@@ -186,7 +232,7 @@ export async function listIntegrations(ctx: Ctx) {
       statusText: row?.status_text ?? "",
       checkedAt: row?.checked_at ? new Date(row.checked_at).toISOString() : null,
       account: row?.settings?.username ? `@${row.settings.username}` : null,
-      webhookUrl: webhookUrl(definition, ctx),
+      webhookUrl: webhookUrl(definition, ctx, secrets),
     };
   });
 }
@@ -231,6 +277,7 @@ export async function saveIntegration(ctx: Ctx, provider: string, input: { value
     }
   }
   if (definition.provider === "telegram_bot" && !secrets.webhookSecret) secrets.webhookSecret = randomBytes(24).toString("hex");
+  if (definition.provider === "telephony_webhook" && !secrets.webhookToken) secrets.webhookToken = randomBytes(24).toString("hex");
   if (definition.fields.some((field) => field.options) && !settings.mode) settings.mode = definition.fields.find((field) => field.key === "mode")?.options?.[0]?.value ?? "";
   const missing = definition.fields.filter((field) => field.required && !(field.secret ? secrets[field.key] : settings[field.key]));
   const enabled = input.enabled ?? row?.enabled ?? false;

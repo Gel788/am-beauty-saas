@@ -8,6 +8,7 @@ import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
 import { api, type ApiError } from "./api";
 import { initials, useToast } from "./ui";
 import { ClientComms } from "./client-comms";
+import { ClientCalls } from "./calls";
 import { TechCard } from "./tech-card";
 import { CustomInputs, type Field } from "./resources-fields-settings";
 
@@ -64,6 +65,20 @@ export function ClientsView() {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, filter]);
+
+  // TEL-POPUP-01: the call card links here: ?open=<client> or ?phone=<number> for a new caller.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("open");
+    const phone = params.get("phone");
+    if (id) void open({ id } as Client).catch(() => undefined);
+    else if (phone) {
+      setCreating(true);
+      setSelected(null);
+      setForm({ name: "", phone, email: "", notes: "" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function open(client: Client) {
     const full = await api<Client>(`/api/clients/${client.id}`);
@@ -200,6 +215,7 @@ export function ClientsView() {
             </form>
           )}
           {selected && !creating && <TechCard clientId={selected.id} />}
+          {selected && !creating && <ClientCalls clientId={selected.id} />}
           {selected && !creating && <ClientComms clientId={selected.id} />}
         </div>
       </div>

@@ -795,3 +795,22 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .mini-cal-today { display: block; width: 100%; margin-top: 6px; border: 0; background: rgba(124, 92, 255, 0.08); color: #6d4fe0; border-radius: 10px; padding: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
 @media (max-width: 980px) { .mini-cal { display: none; } }
 @media (max-height: 900px) and (min-width: 981px) { .nav-item { padding: 5px 10px; font-size: 13.5px; } .wordmark { padding-bottom: 8px; } .salon-switch { margin-bottom: 8px; } }
+
+/* TEL-POPUP-01: who is calling */
+.call-stack { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+.call-card { background: #fff; border-radius: 18px; padding: 14px; box-shadow: 0 18px 48px rgba(60, 30, 100, 0.22); border: 1px solid rgba(124, 92, 255, 0.18); display: flex; flex-direction: column; gap: 10px; animation: call-in 0.25s ease-out; }
+.call-card.ringing .call-ico { animation: call-ring 1s ease-in-out infinite; }
+.call-head { display: flex; gap: 10px; align-items: flex-start; }
+.call-head small { display: block; font-size: 11.5px; color: #7c5cff; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.call-head strong { display: block; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-head .muted { font-size: 12.5px; }
+.call-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #22c55e, #16a34a); flex: none; }
+.call-close { border: 0; background: transparent; cursor: pointer; color: var(--muted, #6f6680); padding: 4px; }
+.call-facts { display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.35; }
+.call-alert { background: #fff1f2; color: #be123c; border-radius: 10px; padding: 6px 8px; font-weight: 600; }
+.call-debt { color: #b45309; font-weight: 600; }
+.call-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.call-row { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.call-row.missed { color: #be123c; }
+@keyframes call-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes call-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(14deg); } 60% { transform: rotate(-8deg); } }
