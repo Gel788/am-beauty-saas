@@ -27,6 +27,9 @@ type Card = {
   imported_visits: number;
   imported_last_visit: string | null;
   imported_revenue_minor: number;
+  allergies: string;
+  contraindications: string;
+  health_consent_at: Date | null;
 };
 
 export type DuplicateGroup = {
@@ -134,6 +137,10 @@ export async function mergeClients(ctx: Ctx, primaryId: string, secondaryId: str
   await move("client_memberships");
   await move("online_payments");
   await move("outbound_messages");
+  await move("client_formulas");
+  await move("client_photos");
+  await move("waitlist_entries");
+  await move("reviews");
   await move("client_tags", "AND tag NOT IN (SELECT tag FROM client_tags WHERE client_id = $1)");
   await ctx.db.query("DELETE FROM client_tags WHERE client_id = $1", [secondaryId]);
   // Telegram: keep the staying card's chat; otherwise take the other one's.
@@ -159,6 +166,7 @@ export async function mergeClients(ctx: Ctx, primaryId: string, secondaryId: str
        consent_marketing = consent_marketing OR $9, consent_marketing_at = COALESCE(consent_marketing_at, $10),
        imported_visits = imported_visits + $11, imported_revenue_minor = imported_revenue_minor + $12,
        imported_last_visit = GREATEST(imported_last_visit, $13::date),
+       allergies = $14, contraindications = $15, health_consent_at = COALESCE(health_consent_at, $16),
        version = version + 1, updated_at = now()
      WHERE id = $1`,
     [
@@ -175,6 +183,10 @@ export async function mergeClients(ctx: Ctx, primaryId: string, secondaryId: str
       Number(secondary.imported_visits),
       Number(secondary.imported_revenue_minor),
       secondary.imported_last_visit,
+      // Never lose a warning: both cards' allergies stay.
+      [...new Set([primary.allergies, secondary.allergies].map((text) => text.trim()).filter(Boolean))].join("; ").slice(0, 500),
+      [...new Set([primary.contraindications, secondary.contraindications].map((text) => text.trim()).filter(Boolean))].join("; ").slice(0, 500),
+      secondary.health_consent_at,
     ],
   );
   await ctx.db.query(

@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import pg from "pg";
-import { seedRetention } from "./seed-retention.mjs";
+import { seedRetention, seedTechCard } from "./seed-retention.mjs";
 
 const connectionString = process.env.MIGRATE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/ambeauty";
 const client = new pg.Client({ connectionString });
@@ -229,6 +229,7 @@ if (paidAppointment) {
 }
 
 await seedRetention(client, { tenant, branch, staff, serviceIds, services, clientIds, adminId: users.admin, today });
+await seedTechCard(client, { tenant, staff, clientIds, userIds: users });
 
 await client.query("COMMIT");
 await client.end();

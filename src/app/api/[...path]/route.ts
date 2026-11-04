@@ -1,4 +1,5 @@
 import { pool } from "@/server/db";
+import { addFormula, addPhoto, deleteFormula, deletePhoto, getPhoto, getTechCard, updateHealth } from "@/server/techcard";
 import {
   closeWaitlistEntry,
   createWaitlistEntry,
@@ -687,6 +688,30 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (key === "POST me/telegram-link") return NextResponse.json(await run((ctx) => telegramLink(ctx, { self: true })));
   if (key === "DELETE me/telegram-link") return NextResponse.json(await run((ctx) => unlinkSelfTelegram(ctx)));
+  if (parts[0] === "clients" && parts[1] && ["techcard", "health", "formulas", "photos"].includes(parts[2] ?? "")) {
+    const clientId = parts[1];
+    if (parts[2] === "techcard" && method === "GET") return NextResponse.json(await run((ctx) => getTechCard(ctx, clientId)));
+    if (parts[2] === "health" && method === "PATCH") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => updateHealth(ctx, clientId, body)));
+    }
+    if (parts[2] === "formulas" && !parts[3] && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => addFormula(ctx, clientId, body)));
+    }
+    if (parts[2] === "formulas" && parts[3] && method === "DELETE") return NextResponse.json(await run((ctx) => deleteFormula(ctx, clientId, parts[3])));
+    if (parts[2] === "photos" && !parts[3] && method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(await run((ctx) => addPhoto(ctx, clientId, body)));
+    }
+    if (parts[2] === "photos" && parts[3] && method === "GET") {
+      const photo = await run((ctx) => getPhoto(ctx, clientId, parts[3]));
+      return new NextResponse(new Uint8Array(photo.data), {
+        headers: { "content-type": photo.mime, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" },
+      });
+    }
+    if (parts[2] === "photos" && parts[3] && method === "DELETE") return NextResponse.json(await run((ctx) => deletePhoto(ctx, clientId, parts[3])));
+  }
   if (parts[0] === "clients" && parts[1] && parts[2] === "messages") {
     if (method === "GET") return NextResponse.json(await run((ctx) => clientMessages(ctx, parts[1])));
     if (method === "POST") {

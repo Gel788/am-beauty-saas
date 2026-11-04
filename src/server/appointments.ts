@@ -1,3 +1,4 @@
+import { healthAlert } from "./techcard";
 import { AppError } from "@/domain/errors";
 import { resolveDensity, type Density } from "@/domain/grid";
 import { isInsideWorkingHours } from "@/domain/schedule";
@@ -406,9 +407,9 @@ export async function getAppointment(ctx: Ctx, id: string) {
   }
   const lines = await linesOf(ctx, id);
   const client = row.client_id
-    ? await one<{ name: string; no_shows: number }>(
+    ? await one<{ name: string; no_shows: number; allergies: string; contraindications: string }>(
         ctx.db,
-        `SELECT name, (SELECT count(*)::int FROM appointments x WHERE x.client_id = c.id AND x.status = 'no_show' AND x.starts_at > $2::timestamptz - interval '365 days') AS no_shows
+        `SELECT name, allergies, contraindications, (SELECT count(*)::int FROM appointments x WHERE x.client_id = c.id AND x.status = 'no_show' AND x.starts_at > $2::timestamptz - interval '365 days') AS no_shows
          FROM clients c WHERE id = $1`,
         [row.client_id, ctx.now.toISOString()],
       )
@@ -429,6 +430,8 @@ export async function getAppointment(ctx: Ctx, id: string) {
     clientName: client?.name ?? null,
     /** NOSHOW-01: the desk sees an unreliable client before taking the booking. */
     clientNoShows: Number(client?.no_shows ?? 0),
+    /** CL-TECH-04: allergies and contraindications, shown as a warning on the record. */
+    clientAlert: client ? healthAlert(client.allergies, client.contraindications) : null,
     bookedByClientId: row.booked_by_client_id,
     guest: Boolean(row.booked_by_client_id),
     startsAt: new Date(row.starts_at).toISOString(),

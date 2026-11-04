@@ -5,6 +5,7 @@
  * - AN-EXPORT-01: the same report as CSV, audited.
  * - MASTER-DAY-01: a master's own day on the phone.
  */
+import { healthAlert } from "./techcard";
 import { AppError } from "@/domain/errors";
 import { addCalendarDays, formatLocalDate, formatLocalTime, localDayUtcRange, todayInZone } from "@/domain/time";
 import { loadBranch } from "./access";
@@ -368,9 +369,10 @@ export async function masterDay(ctx: Ctx, input: { date?: string; branchId?: str
   const branch = await loadBranch(ctx, ctx.actor.branchId ?? branchRow.branch_id);
   const date = input.date && DATE.test(input.date) ? input.date : todayInZone(branch.timezone, ctx.now);
   const range = localDayUtcRange(date, branch.timezone);
-  const rows = await many<{ id: string; version: number; starts_at: Date; ends_at: Date; status: string; comment: string; client_id: string | null; client_name: string | null; client_notes: string | null; phone: string | null; title: string | null; price_minor: number; visits: number }>(
+  const rows = await many<{ id: string; version: number; starts_at: Date; ends_at: Date; status: string; comment: string; client_id: string | null; client_name: string | null; client_notes: string | null; allergies: string | null; contraindications: string | null; last_formula: string | null; phone: string | null; title: string | null; price_minor: number; visits: number }>(
     ctx.db,
-    `SELECT a.id, a.version, a.starts_at, a.ends_at, a.status, a.comment, a.client_id, c.name AS client_name, c.notes AS client_notes,
+    `SELECT a.id, a.version, a.starts_at, a.ends_at, a.status, a.comment, a.client_id, c.name AS client_name, c.notes AS client_notes, c.allergies, c.contraindications,
+            (SELECT f.body FROM client_formulas f WHERE f.client_id = a.client_id AND f.deleted_at IS NULL ORDER BY f.created_at DESC LIMIT 1) AS last_formula,
             (SELECT phone_e164 FROM client_phones p WHERE p.client_id = c.id AND p.deleted_at IS NULL ORDER BY p.is_primary DESC LIMIT 1) AS phone,
             (SELECT string_agg(title_snapshot, ', ' ORDER BY position) FROM appointment_services WHERE appointment_id = a.id) AS title,
             (SELECT COALESCE(SUM(price_minor), 0)::int FROM appointment_services WHERE appointment_id = a.id) AS price_minor,
@@ -419,6 +421,9 @@ export async function masterDay(ctx: Ctx, input: { date?: string; branchId?: str
       clientId: row.client_id,
       clientName: row.client_name,
       clientNotes: row.client_notes ?? "",
+      // CL-TECH-04: the master sees allergies and the last formula before the client sits down.
+      alert: healthAlert(row.allergies, row.contraindications),
+      lastFormula: row.last_formula,
       phone: row.phone,
       firstVisit: Number(row.visits) === 0,
       visits: Number(row.visits),

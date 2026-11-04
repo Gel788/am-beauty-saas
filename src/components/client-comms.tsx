@@ -18,6 +18,10 @@ const KIND: Record<string, string> = {
   booking_created: "Запись создана",
   booking_cancelled: "Отмена",
   pay_link: "Ссылка на оплату",
+  review_request: "Просьба об отзыве",
+  waitlist_offer: "Окно из листа ожидания",
+  rebook: "Пора на повторный визит",
+  birthday: "День рождения",
 };
 const SOURCE: Record<string, string> = { online: "в онлайн-записи", desk: "в салоне" };
 const CHANNEL: Record<string, string> = { telegram: "Telegram", sms: "SMS", log: "журнал" };

@@ -29,6 +29,8 @@ type Day = {
     clientId: string | null;
     clientName: string | null;
     clientNotes: string;
+    alert: string | null;
+    lastFormula: string | null;
     phone: string | null;
     firstVisit: boolean;
     visits: number;
@@ -110,7 +112,9 @@ export function MasterDay() {
             {appt.firstVisit ? <span className="tag tag-warn">первый визит</span> : <span className="muted" style={{ fontSize: 12 }}>визит № {appt.visits + 1}</span>}
           </div>
           <span style={{ fontSize: 14 }}>{appt.title} · {formatMoney(appt.priceMinor)}</span>
+          {appt.alert && <div className="me-note alert">⚠ {appt.alert}</div>}
           {appt.clientNotes && <div className="me-note">{appt.clientNotes}</div>}
+          {appt.lastFormula && <div className="me-note soft">Формула: {appt.lastFormula}</div>}
           {appt.comment && <div className="me-note soft">К записи: {appt.comment}</div>}
           <div className="row" style={{ gap: 8 }}>
             {NEXT[appt.status] && day.date === day.today && (

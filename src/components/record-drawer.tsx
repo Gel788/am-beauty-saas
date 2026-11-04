@@ -51,6 +51,7 @@ export function RecordDrawer({
   const [clientId, setClientId] = useState<string | null>(null);
   const [clientName, setClientName] = useState("");
   const [noShows, setNoShows] = useState(0);
+  const [alert, setAlert] = useState<string | null>(null);
   const [rebooked, setRebooked] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ClientHit[]>([]);
@@ -124,6 +125,7 @@ export function RecordDrawer({
       clientId: string | null;
       clientName: string | null;
       clientNoShows: number;
+      clientAlert: string | null;
       staffId: string;
       startsAt: string;
       comment: string;
@@ -140,6 +142,7 @@ export function RecordDrawer({
       setClientId(row.clientId);
       setClientName(row.clientName ?? "");
       setNoShows(row.clientNoShows ?? 0);
+      setAlert(row.clientAlert ?? null);
       setStaffId(row.staffId);
       const start = new Date(row.startsAt);
       const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(start);
@@ -393,6 +396,7 @@ export function RecordDrawer({
             <div className="page-kicker">{seed.id ? STATUS_LABEL[status] : "Новая запись"} {source === "online" ? "· онлайн" : ""}</div>
             <h2 className="display" style={{ fontSize: 26 }}>{clientName || "Запись"}</h2>
             {seed.id && noShows > 0 && <span className="tag noshow-flag" title="За последний год">неявок: {noShows}</span>}
+            {seed.id && alert && <div className="health-alert">⚠ {alert}</div>}
           </div>
           <button className="icon-btn" onClick={askClose} aria-label="Закрыть">×</button>
         </div>

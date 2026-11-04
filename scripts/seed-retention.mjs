@@ -86,3 +86,33 @@ export async function seedRetention(client, { tenant, branch, staff, serviceIds,
     );
   }
 }
+
+/** Demo tech card: allergies, formulas and before/after photos for a regular client. */
+export async function seedTechCard(client, { tenant, staff, clientIds, userIds }) {
+  const fs = await import("node:fs");
+  const anna = clientIds["Анна Смирнова"];
+  await client.query(
+    "UPDATE clients SET allergies = 'Латекс — только нитриловые перчатки', contraindications = 'Тонкая ногтевая пластина, без опила верха', health_consent_at = now() - interval '60 days', notes = 'Любит форму «миндаль», без страз' WHERE id = $1",
+    [anna],
+  );
+  const formulas = [
+    ["nails", "База Kodi Rubber 12, цвет Luxio 40 «пыльная роза», топ без липкого слоя. Форма миндаль, длина 2 мм", 45],
+    ["nails", "Укрепление акригелем, цвет Kodi 70 «бордо», френч не нужен", 24],
+    ["care", "Парафинотерапия рук — понравилось, кожа сухая", 24],
+  ];
+  for (const [kind, body, daysAgo] of formulas) {
+    await client.query(
+      "INSERT INTO client_formulas (id, tenant_id, client_id, staff_id, kind, body, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now() - make_interval(days => $8))",
+      [crypto.randomUUID(), tenant, anna, staff.alina, kind, body, userIds.alina, daysAgo],
+    );
+  }
+  const photos = [["before.jpg", "before", "До: после чужого мастера", 45], ["after.jpg", "after", "Пыльная роза, миндаль", 45], ["after2.jpg", "after", "Бордо", 24]];
+  for (const [file, kind, caption, daysAgo] of photos) {
+    const data = fs.readFileSync(new URL(`./demo/${file}`, import.meta.url));
+    await client.query(
+      `INSERT INTO client_photos (id, tenant_id, client_id, staff_id, kind, caption, mime, size_bytes, data, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'image/jpeg',$7,$8,$9, now() - make_interval(days => $10))`,
+      [crypto.randomUUID(), tenant, anna, staff.alina, kind, caption, data.length, data, userIds.alina, daysAgo],
+    );
+  }
+}
