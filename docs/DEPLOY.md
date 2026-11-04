@@ -9,7 +9,17 @@
 - Ubuntu 22.04 или 24.04, Docker с плагином compose.
 - Доменное имя, A-запись которого указывает на сервер. Порты 80 и 443 открыты.
 
-## Первый запуск
+## Одной командой
+
+На чистом сервере Ubuntu или Debian под root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Gel788/am-beauty-saas/main/deploy/install.sh | BRANCH=main bash
+```
+
+Скрипт ставит Docker, забирает код, создаёт `deploy/.env` со случайными паролями и ключами, собирает образ, применяет миграции и запускает всё. Если домена нет, сервер получает имя `<ip>.sslip.io` с настоящим сертификатом HTTPS. Повторный запуск обновляет установку и сохраняет `.env` и данные. Параметры: `DOMAIN`, `ADMIN_EMAIL` (кто видит «Платформу»), `SEED=1` (загрузить демо-данные), `BRANCH`.
+
+## Первый запуск вручную
 
 ```bash
 git clone https://github.com/Gel788/am-beauty-saas.git && cd am-beauty-saas
