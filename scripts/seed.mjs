@@ -298,6 +298,8 @@ await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id =
 await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
 
 // PLAT-CABINET: a few more salons on the platform so the platform owner's cabinet has something to show.
+// PLAT-CABINET-05: the platform owner signs in apart from any salon (PLATFORM_ADMIN_EMAILS=platform@ambeauty.local).
+await client.query("INSERT INTO users (id, email, password_hash, name) VALUES ($1, 'platform@ambeauty.local', $2, 'Владелец платформы')", [crypto.randomUUID(), hash]);
 const demoSalons = [
   { n: 1, name: "Studio Lumière", plan: "salon", months: 6, agoDays: 200, paidMonths: [190, 10], activityDays: 0, staff: 7, branches: 1 },
   { n: 2, name: "Nail Bar «Кокос»", plan: "start", months: 1, agoDays: 120, paidMonths: [110, 80, 50, 20], activityDays: 1, staff: 3, branches: 1 },

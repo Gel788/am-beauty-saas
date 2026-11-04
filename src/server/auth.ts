@@ -2,7 +2,8 @@ import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { AppError } from "@/domain/errors";
 import { many, one, poolOne, withSession } from "./db";
-import type { Actor, Ctx, Role } from "./types";
+import { isPlatformAdmin } from "./platform-admin";
+import type { Actor, Ctx, PlatformActor, Role } from "./types";
 
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -48,10 +49,10 @@ export async function register(input: {
   return { token, actor: actor! };
 }
 
-export async function login(email: string, password: string) {
+export async function login(email_: string, password: string) {
   const user = await poolOne<{ id: string; password_hash: string }>(
     "SELECT id, password_hash FROM users WHERE email = $1",
-    [email.trim().toLowerCase()],
+    [email_.trim().toLowerCase()],
   );
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
     throw new AppError("VALIDATION", "Неверная почта или пароль");
@@ -59,10 +60,24 @@ export async function login(email: string, password: string) {
   const memberships = await withSession({ userId: user.id }, async (db) =>
     many(db, "SELECT id FROM memberships WHERE user_id = $1", [user.id]),
   );
-  if (!memberships.length) throw new AppError("FORBIDDEN", "Нет доступа к салону");
+  // PLAT-CABINET-05: the platform team signs in without a salon and lands in its own cabinet.
+  const email = email_.trim().toLowerCase();
+  const platform = isPlatformAdmin({ email });
+  if (!memberships.length && !platform) throw new AppError("FORBIDDEN", "Нет доступа к салону");
   const token = await createSession(user.id);
-  const actor = await actorFromToken(token);
-  return { token, actor: actor! };
+  const actor = memberships.length ? await actorFromToken(token) : null;
+  return { token, actor, platform };
+}
+
+/** The signed-in person if they are on the platform team (PLATFORM_ADMIN_EMAILS), salon or not. */
+export async function platformUserFromToken(token: string | undefined | null): Promise<PlatformActor | null> {
+  if (!token) return null;
+  const user = await poolOne<{ id: string; name: string; email: string }>(
+    "SELECT u.id, u.name, u.email FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > now()",
+    [sha256(token)],
+  );
+  if (!user || !isPlatformAdmin(user)) return null;
+  return { userId: user.id, name: user.name, email: user.email };
 }
 
 export async function logout(token: string) {

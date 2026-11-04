@@ -3,7 +3,7 @@ import { AppError } from "@/domain/errors";
 import { planById } from "@/domain/plans";
 import { assertPlatform, platformTenants } from "./billing";
 import { pool } from "./db";
-import type { Actor } from "./types";
+import type { PlatformActor as Actor } from "./types";
 
 /** PLAT-CABINET-*: the platform owner's cabinet. Every call is for PLATFORM_ADMIN_EMAILS only. */
 

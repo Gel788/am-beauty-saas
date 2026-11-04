@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { Banknote, BarChart3, Building2, CreditCard, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, CreditCard, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
@@ -99,9 +99,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            {me?.platformAdmin && (
-              <Link href="/platform" className={`nav-item ${pathname.startsWith("/platform") ? "active" : ""}`}><Building2 />Платформа</Link>
-            )}
           </nav>
           {me && (DESK.includes(me.actor.role) || me.actor.role === "accountant") && <Notifications />}
           <div className="side-grow" />
