@@ -804,3 +804,5 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .channel-row small { font-size: 11.5px; line-height: 1.3; }
 .channel-row input { min-width: 0; }
 @media (max-width: 720px) { .channel-row { grid-template-columns: 1fr; } }
+/* RES-VIEW-02: the room a visit is dragged onto */
+.day-col.drop-target { background: rgba(124, 92, 255, 0.06); }

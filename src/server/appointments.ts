@@ -649,6 +649,8 @@ export async function moveAppointment(
     forceOverlap?: boolean;
     overlapReason?: string;
     overwrite?: boolean;
+    /** RES-VIEW-02: dropped onto another room or device in the «Кабинеты» view. */
+    resourceIds?: string[];
   },
 ) {
   const row = await loadRow(ctx, id, true);
@@ -657,6 +659,7 @@ export async function moveAppointment(
   if (row.status === "cancelled" || row.status === "completed") {
     throw new AppError("VALIDATION", "Эту запись нельзя переносить");
   }
+  const wanted = Array.isArray(input.resourceIds) ? input.resourceIds.filter((value) => typeof value === "string" && /^[0-9a-f-]{36}$/.test(value)) : [];
   const staffId = input.staffId ?? row.staff_id;
   if (ctx.actor.role === "master") {
     if (!branch.master_can_drag_own || ctx.actor.staffId !== row.staff_id || staffId !== ctx.actor.staffId) {
@@ -685,7 +688,18 @@ export async function moveAppointment(
   assertSameDay(starts, ends, branch.timezone);
   const overlaps = await findOverlaps(ctx, staffId, starts, ends, id);
   const forced = assertSlot(overlaps, row.branch_id, input.forceOverlap, input.overlapReason, isAdminPlus(ctx.actor));
-  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds: lines.flatMap((line) => (line.serviceId ? [line.serviceId] : [])), starts, ends, timeZone: branch.timezone });
+  const serviceIds = lines.flatMap((line) => (line.serviceId ? [line.serviceId] : []));
+  for (const resourceId of wanted) {
+    const fits = await one(
+      ctx.db,
+      `SELECT 1 FROM service_resources sr JOIN resources r ON r.id = sr.resource_id
+       WHERE sr.resource_id = $1 AND sr.service_id = ANY($2::uuid[]) AND r.branch_id = $3 AND r.active`,
+      [resourceId, serviceIds, row.branch_id],
+    );
+    if (!fits) throw new AppError("VALIDATION", "Эта услуга не проводится в этом кабинете или на этом аппарате");
+  }
+  const before = await resourcesOf(ctx, id);
+  const plan = await planResources(ctx, { appointmentId: id, branchId: row.branch_id, serviceIds, starts, ends, timeZone: branch.timezone, preferred: wanted });
   const extra = [...(row.status === "in_progress" ? ["IN_PROGRESS"] : []), ...plan.warnings];
   await assertHours(ctx, branch, staffId, starts, ends, input.acknowledgeSoft, extra);
   await writeResources(ctx, id, plan.resourceIds);
@@ -701,8 +715,8 @@ export async function moveAppointment(
     entityId: id,
     action: "appointment.moved",
     diff: {
-      from: { startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), staffId: row.staff_id },
-      to: { startsAt: starts.toISOString(), endsAt: ends.toISOString(), staffId },
+      from: { startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), staffId: row.staff_id, resourceIds: before.map((item) => item.id) },
+      to: { startsAt: starts.toISOString(), endsAt: ends.toISOString(), staffId, resourceIds: plan.resourceIds },
     },
   });
   return getAppointment(ctx, id);

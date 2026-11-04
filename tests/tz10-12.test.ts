@@ -75,6 +75,26 @@ describe("resources (RES)", () => {
     expect(journal.appointments.find((row) => row.id === third.id)?.resourceIds).toContain(roomA);
   });
 
+  it("RES-VIEW-02 drag in «Кабинеты»: another room and time in one move; busy or unlinked room refused", async () => {
+    const visit = await book(salon.staffA, "16:00");
+    const from = visit.resources.find((row) => row.kind === "room")!.id;
+    const to = from === roomA ? roomB : roomA;
+    const moved = await run(salon.admin, (ctx) => moveAppointment(ctx, visit.id, { version: visit.version, startsAt: at("16:30", "2026-11-10"), resourceIds: [to], acknowledgeSoft: true }));
+    expect(moved.resources.map((row) => row.id)).toEqual(expect.arrayContaining([to, laser]));
+    expect(moved.resources.map((row) => row.id)).not.toContain(from);
+    const history = moved.history.find((entry) => entry.action === "appointment.moved");
+    expect(JSON.stringify(history)).toContain(to);
+    // The other room is taken at that time by another master's visit.
+    const blocker = await book(salon.staffB, "16:30", { resourceIds: [from] });
+    await expect(run(salon.admin, (ctx) => moveAppointment(ctx, visit.id, { version: moved.version, startsAt: at("16:30", "2026-11-10"), resourceIds: [from], acknowledgeSoft: true }))).rejects.toMatchObject({ code: "CONFLICT_RESOURCE" });
+    // A room the service is not done in.
+    const other = (await run(salon.admin, (ctx) => saveResource(ctx, { branchId: salon.branchId, title: "Солярий", kind: "room" }))).id;
+    await expect(run(salon.admin, (ctx) => moveAppointment(ctx, visit.id, { version: moved.version, startsAt: at("17:30", "2026-11-10"), resourceIds: [other], acknowledgeSoft: true }))).rejects.toMatchObject({ code: "VALIDATION" });
+    await run(salon.admin, (ctx) => cancelAppointment(ctx, blocker.id, { version: blocker.version, reason: "тест" }));
+    await run(salon.admin, (ctx) => cancelAppointment(ctx, moved.id, { version: moved.version, reason: "тест" }));
+    await run(salon.admin, (ctx) => deleteResource(ctx, other));
+  });
+
   it("RES-CRUD-01 a booked resource is only deactivated; online slots respect resources", async () => {
     expect(await run(salon.admin, (ctx) => deleteResource(ctx, roomA))).toEqual({ deleted: false, deactivated: true });
     const spare = await run(salon.admin, (ctx) => saveResource(ctx, { branchId: salon.branchId, title: "Склад" }));

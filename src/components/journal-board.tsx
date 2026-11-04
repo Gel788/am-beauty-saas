@@ -401,7 +401,16 @@ export function JournalBoard() {
           onOpenAppointment={(id, day) => { setView("day"); go(day); setSeed({ id, staffId: "", startMin: 0, date: day }); }}
         />
       ) : columnsBy === "resource" && journal && (journal.resources?.length ?? 0) > 0 ? (
-        <ResourceGrid journal={journal} hours={hours} onOpen={(id) => setSeed({ id, staffId: "", startMin: 0, date })} onOpenGroup={(id) => router.push(`/groups?open=${id}`)} staffName={(id) => journal.staff.find((item) => item.id === id)?.name ?? ""} />
+        <ResourceGrid
+          journal={journal}
+          hours={hours}
+          date={date}
+          timezone={timezone}
+          onOpen={(id) => setSeed({ id, staffId: "", startMin: 0, date })}
+          onOpenGroup={(id) => router.push(`/groups?open=${id}`)}
+          onMoved={() => api<Journal>(`/api/journal?date=${date}&branchId=${branchId}&showOff=${showOff ? "1" : "0"}&showCancelled=${showCancelled ? "1" : "0"}`).then(setJournal).catch(() => undefined)}
+          staffName={(id) => journal.staff.find((item) => item.id === id)?.name ?? ""}
+        />
       ) : (
         <div className="cal-scroll" ref={columnsRef}>
           {loading && !journal && <div className="skeleton" />}
@@ -537,15 +546,119 @@ export function JournalBoard() {
   );
 }
 
-/** RES-VIEW-01: the same day by rooms and devices. Visits open the drawer; groups open their page. */
-function ResourceGrid({ journal, hours, onOpen, onOpenGroup, staffName }: { journal: Journal; hours: number[]; onOpen: (id: string) => void; onOpenGroup: (id: string) => void; staffName: (id: string) => string }) {
+type RoomDrag = { id: string; resourceId: string; fromResource: string; startMin: number; endMin: number; invalid: boolean };
+
+/**
+ * RES-VIEW-01: the same day by rooms and devices. Visits open the drawer; groups open their page.
+ * RES-VIEW-02: a visit is dragged up/down to another time and sideways to another room of the same kind.
+ */
+function ResourceGrid({
+  journal,
+  hours,
+  date,
+  timezone,
+  onOpen,
+  onOpenGroup,
+  onMoved,
+  staffName,
+}: {
+  journal: Journal;
+  hours: number[];
+  date: string;
+  timezone: string;
+  onOpen: (id: string) => void;
+  onOpenGroup: (id: string) => void;
+  onMoved: () => void;
+  staffName: (id: string) => string;
+}) {
+  const toast = useToast();
   const resources = journal.resources ?? [];
   const dayStart = journal.dayStartMin;
   const span = Math.max(30, journal.dayEndMin - dayStart);
   const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+  const [drag, setDrag] = useState<RoomDrag | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  function busyIn(resourceId: string, from: number, to: number, except: string) {
+    const resource = resources.find((item) => item.id === resourceId);
+    const taken = journal.appointments.filter((appt) => appt.id !== except && appt.status !== "cancelled" && appt.resourceIds?.includes(resourceId) && appt.startMin < to && from < appt.endMin).length;
+    const groups = (journal.groups ?? []).filter((group) => group.resourceId === resourceId && group.startMin < to && from < group.endMin).length;
+    return groups > 0 || taken >= Math.max(1, resource?.capacity ?? 1);
+  }
+
+  async function commit(current: RoomDrag) {
+    const appt = journal.appointments.find((item) => item.id === current.id);
+    if (!appt) return;
+    if (current.invalid) {
+      toast("Кабинет занят в это время", "error");
+      setDrag(null);
+      return;
+    }
+    try {
+      await api(`/api/appointments/${appt.id}/move`, {
+        method: "POST",
+        body: JSON.stringify({
+          version: appt.version,
+          startsAt: zonedDateTimeToUtc(date, current.startMin, timezone).toISOString(),
+          staffId: appt.staffId,
+          resourceIds: current.resourceId !== current.fromResource ? [current.resourceId] : [],
+          acknowledgeSoft: true,
+        }),
+      });
+      const room = resources.find((item) => item.id === current.resourceId)?.title ?? "";
+      toast(current.resourceId !== current.fromResource ? `Запись перенесена: ${room}, ${hh(current.startMin)}` : `Запись перенесена на ${hh(current.startMin)}`);
+    } catch (error) {
+      toast((error as ApiError).message, "error");
+    }
+    setDrag(null);
+    onMoved();
+  }
+
+  function onPointerDown(event: React.PointerEvent, appt: Appt, fromResource: string) {
+    if (appt.status === "cancelled" || appt.status === "completed") return;
+    event.preventDefault();
+    const column = (event.currentTarget as HTMLElement).closest<HTMLElement>(".day-col");
+    const pxPerMin = (column?.getBoundingClientRect().height ?? span) / span;
+    const fromKind = resources.find((item) => item.id === fromResource)?.kind;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const started = Date.now();
+    let current: RoomDrag | null = null;
+    const move = (ev: PointerEvent) => {
+      if (!current && (pointerIntent(Date.now() - started) === "click" || Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 6)) return;
+      const delta = Math.round((ev.clientY - startY) / pxPerMin / 5) * 5;
+      const duration = appt.endMin - appt.startMin;
+      const startMin = Math.min(Math.max(0, appt.startMin + delta), 24 * 60 - duration);
+      const nodes = [...(gridRef.current?.querySelectorAll<HTMLElement>("[data-resource]") ?? [])].map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { staffId: node.dataset.resource || "", x: rect.left, width: rect.width, hidden: false };
+      });
+      const hit = hitTestColumn(nodes, ev.clientX);
+      // Only to a room of the same kind: a manicure does not move onto the laser.
+      const target = hit && resources.find((item) => item.id === hit)?.kind === fromKind ? hit : current?.resourceId ?? fromResource;
+      current = { id: appt.id, resourceId: target, fromResource, startMin, endMin: startMin + duration, invalid: busyIn(target, startMin, startMin + duration, appt.id) };
+      setDrag(current);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!current) {
+        onOpen(appt.id);
+        return;
+      }
+      if (current.startMin === appt.startMin && current.resourceId === fromResource) {
+        setDrag(null);
+        return;
+      }
+      void commit(current);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
   return (
     <div className="cal-scroll">
-      <div className="cal-grid" style={{ gridTemplateColumns: `52px repeat(${resources.length}, minmax(0, 1fr))` }}>
+      <div className="cal-grid" ref={gridRef} style={{ gridTemplateColumns: `52px repeat(${resources.length}, minmax(0, 1fr))` }}>
         <div />
         {resources.map((resource) => (
           <div className="master-head" key={resource.id}>
@@ -564,33 +677,47 @@ function ResourceGrid({ journal, hours, onOpen, onOpenGroup, staffName }: { jour
         {resources.map((resource) => {
           const visits = journal.appointments.filter((appt) => appt.status !== "cancelled" && appt.resourceIds?.includes(resource.id));
           return (
-            <div key={resource.id} className="day-col" data-resource={resource.id}>
+            <div key={resource.id} className={`day-col ${drag && drag.resourceId === resource.id && drag.fromResource !== resource.id ? "drop-target" : ""}`} data-resource={resource.id}>
               {hours.map((minute) => <div key={minute} className="hour-line" style={{ top: `${((minute - dayStart) / span) * 100}%` }} />)}
               {visits.map((appt) => {
+                const dragging = drag?.id === appt.id && drag.fromResource === resource.id;
                 // Two visits at once in a room for two: split the column.
                 const lanes = resource.capacity > 1 ? visits.filter((other) => other.startMin < appt.endMin && other.endMin > appt.startMin) : [appt];
                 const lane = Math.max(0, lanes.indexOf(appt));
                 const width = 100 / Math.max(1, lanes.length);
+                const start = dragging && drag.resourceId === resource.id ? drag.startMin : appt.startMin;
+                const end = dragging && drag.resourceId === resource.id ? drag.endMin : appt.endMin;
                 return (
                   <button
                     key={appt.id}
-                    className="appt"
+                    className={`appt ${dragging ? "preview" : ""} ${dragging && drag.invalid ? "bad" : ""}`}
                     style={{
-                      top: `${((appt.startMin - dayStart) / span) * 100}%`,
-                      height: `calc(${((appt.endMin - appt.startMin) / span) * 100}% - 3px)`,
+                      top: `${((start - dayStart) / span) * 100}%`,
+                      height: `calc(${((end - start) / span) * 100}% - 3px)`,
                       left: `calc(${lane * width}% + 3px)`,
                       width: `calc(${width}% - 6px)`,
                       right: "auto",
                       background: `linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)), ${appt.color}`,
+                      opacity: dragging && drag.resourceId !== resource.id ? 0.35 : 1,
+                      touchAction: "none",
                     }}
-                    onClick={() => onOpen(appt.id)}
+                    onPointerDown={(event) => onPointerDown(event, appt, resource.id)}
                   >
-                    <span className="when">{hh(appt.startMin)}–{hh(appt.endMin)}</span>
+                    <span className="when">{hh(start)}–{hh(end)}</span>
                     <b>{appt.clientName || "Без имени"}</b>
                     <small>{staffName(appt.staffId)} · {appt.services[0]?.title ?? ""}</small>
                   </button>
                 );
               })}
+              {drag && drag.resourceId === resource.id && drag.fromResource !== resource.id && (
+                <div
+                  className={`appt preview ${drag.invalid ? "bad" : ""}`}
+                  style={{ top: `${((drag.startMin - dayStart) / span) * 100}%`, height: `calc(${((drag.endMin - drag.startMin) / span) * 100}% - 3px)`, background: "#efe7ff" }}
+                >
+                  <span className="when">{hh(drag.startMin)}–{hh(drag.endMin)}</span>
+                  <b>{journal.appointments.find((appt) => appt.id === drag.id)?.clientName ?? ""}</b>
+                </div>
+              )}
               {(journal.groups ?? []).filter((group) => group.resourceId === resource.id).map((group) => (
                 <button
                   key={group.id}
