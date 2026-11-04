@@ -795,3 +795,6 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .mini-cal-today { display: block; width: 100%; margin-top: 6px; border: 0; background: rgba(124, 92, 255, 0.08); color: #6d4fe0; border-radius: 10px; padding: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
 @media (max-width: 980px) { .mini-cal { display: none; } }
 @media (max-height: 900px) and (min-width: 981px) { .nav-item { padding: 5px 10px; font-size: 13.5px; } .wordmark { padding-bottom: 8px; } .salon-switch { margin-bottom: 8px; } }
+
+/* RES-VIEW-02: the room a visit is dragged onto */
+.day-col.drop-target { background: rgba(124, 92, 255, 0.06); }

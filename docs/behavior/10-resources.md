@@ -53,6 +53,12 @@ Conflict checks: server-side на любой Save/drag.
 - Drag между resource columns = смена AppointmentResource (+ optional staff unchanged).  
 - Invalid drop → danger preview.
 
+### RES-VIEW-02 · Перетаскивание в виде «Кабинеты» (сделано)
+- Вверх-вниз — другое время, вбок — другой кабинет или аппарат того же вида; мастер не меняется. Одно движение может поменять и время, и кабинет.
+- Превью краснеет, если в целевом ресурсе на это время уже нет мест (с учётом вместимости и групповых занятий).
+- Сервер: `POST /appointments/:id/move` с `resourceIds`. Ресурс, не привязанный к услуге, → VALIDATION; занятый → CONFLICT_RESOURCE. В истории записи видно, из какого кабинета в какой перенесли.
+- Короткий клик по-прежнему открывает карточку записи.
+
 ### RES-DRAG-STAFF-01
 - Drag в staff view не обязан менять resource; если услуга requires resource и новый time занят — hard/soft как conflict policy.
 
