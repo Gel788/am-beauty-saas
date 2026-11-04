@@ -2,6 +2,7 @@
 # One-command install or update of AM Beauty CRM on a fresh Ubuntu/Debian server.
 #   curl -fsSL https://raw.githubusercontent.com/Gel788/am-beauty-saas/staging/deploy/install.sh | sudo bash
 # Options (env): BRANCH=staging  DIR=/opt/am-beauty-saas  DOMAIN=<your domain>  ADMIN_EMAIL=<platform owner>  SEED=1|0  RESET_DB=1 (drop a leftover database; by default it is kept and its password realigned)
+#   AUTO_UPDATE=1|0 (default 1): every 3 minutes the server checks the branch and redeploys itself when it changed.
 # Without DOMAIN the server gets a free name <ip>.sslip.io with a real HTTPS certificate.
 set -euo pipefail
 
@@ -103,8 +104,50 @@ for i in $(seq 1 60); do
   if curl -fsS "http://127.0.0.1/api/health" -H "Host: $DOMAIN_NOW" >/dev/null 2>&1 || curl -fsSk "https://$DOMAIN_NOW/api/health" >/dev/null 2>&1; then break; fi
   sleep 3
 done
+# Auto-update: a systemd timer pulls the branch and reruns this script (without demo data) when it changed.
+if [ "${AUTO_UPDATE:-1}" = 1 ] && command -v systemctl >/dev/null 2>&1; then
+  say "Auto-update from $BRANCH every 3 minutes"
+  cat > /usr/local/bin/am-beauty-autoupdate <<UPD
+#!/usr/bin/env bash
+set -euo pipefail
+exec 9>/run/am-beauty-autoupdate.lock
+flock -n 9 || exit 0
+cd "$DIR"
+git fetch -q origin "$BRANCH"
+target="\$(git rev-parse "origin/$BRANCH")"
+# Compared with the last successful deploy, so a failed build is retried on the next tick.
+[ "\$(cat /var/lib/am-beauty-deployed 2>/dev/null || true)" = "\$target" ] && exit 0
+echo "\$(date '+%F %T') updating to \${target:0:7}"
+git checkout -q -B "$BRANCH" "origin/$BRANCH"
+SEED=0 AUTO_UPDATE=1 BRANCH="$BRANCH" DIR="$DIR" bash deploy/install.sh
+UPD
+  chmod +x /usr/local/bin/am-beauty-autoupdate
+  cat > /etc/systemd/system/am-beauty-autoupdate.service <<UNIT
+[Unit]
+Description=AM Beauty CRM: redeploy when $BRANCH changes
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/usr/local/bin/am-beauty-autoupdate >> /var/log/am-beauty-update.log 2>&1'
+UNIT
+  cat > /etc/systemd/system/am-beauty-autoupdate.timer <<UNIT
+[Unit]
+Description=AM Beauty CRM: check $BRANCH for updates
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now am-beauty-autoupdate.timer >/dev/null 2>&1
+elif [ "${AUTO_UPDATE:-1}" = 0 ] && [ -f /etc/systemd/system/am-beauty-autoupdate.timer ]; then
+  systemctl disable --now am-beauty-autoupdate.timer >/dev/null 2>&1 || true
+fi
+
+mkdir -p /var/lib && git rev-parse HEAD > /var/lib/am-beauty-deployed
 say "Done"
 echo "CRM:        https://$DOMAIN_NOW"
 [ "$SEED" = 1 ] && echo "Demo logins: salon olga@ambeauty.local / ambeauty, platform platform@ambeauty.local / ambeauty"
 echo "Platform:   https://$DOMAIN_NOW/platform  (for $(grep -E '^PLATFORM_ADMIN_EMAILS=' "$ENV" | cut -d= -f2-))"
+[ "${AUTO_UPDATE:-1}" = 1 ] && echo "Updates:    automatic from $BRANCH every 3 min, log /var/log/am-beauty-update.log (AUTO_UPDATE=0 to turn off)"
 echo "Health:     $(curl -fsSk "https://$DOMAIN_NOW/api/health" 2>/dev/null || echo 'certificate is still being issued, try again in a minute')"
