@@ -47,12 +47,18 @@ await client.query("BEGIN");
 await client.query("DELETE FROM tenants WHERE id = $1", [tenant]);
 await client.query("DELETE FROM users WHERE email LIKE '%@ambeauty.local'");
 await client.query("INSERT INTO tenants (id, name, slug) VALUES ($1, 'Am Beauty', 'am-beauty')", [tenant]);
+// Insert the filled primary branch first so listBranches / UI default (branches[0]) is never empty.
+await client.query(
+  `INSERT INTO branches (id, tenant_id, name, address, timezone, require_payment_on_complete, slug,
+     fiscal_enabled, fiscal_inn, fiscal_place, acquiring_enabled, created_at)
+   VALUES ($1, $2, 'Am Beauty · Садовая', 'Садовая, 14', 'Europe/Moscow', true, 'sadovaya', true, '770123456789', 'г. Москва, ул. Садовая, 14', true, now() - interval '1 second')`,
+  [branch, tenant],
+);
 await client.query(
   `INSERT INTO branches (id, tenant_id, name, address, timezone, require_payment_on_complete, slug,
      fiscal_enabled, fiscal_inn, fiscal_place, acquiring_enabled)
-   VALUES ($1, $3, 'Am Beauty · Садовая', 'Садовая, 14', 'Europe/Moscow', true, 'sadovaya', true, '770123456789', 'г. Москва, ул. Садовая, 14', true),
-          ($2, $3, 'Am Beauty · Патриаршие', 'Патриаршие пруды', 'Europe/Moscow', true, 'patriarshie', false, '', '', false)`,
-  [branch, branch2, tenant],
+   VALUES ($1, $2, 'Am Beauty · Патриаршие', 'Патриаршие пруды', 'Europe/Moscow', true, 'patriarshie', false, '', '', false)`,
+  [branch2, tenant],
 );
 await client.query(
   `INSERT INTO users (id, email, password_hash, name) VALUES
@@ -82,13 +88,15 @@ for (const [id, userId, name, color] of staffRows) {
     "INSERT INTO staff (id, tenant_id, user_id, display_name, color) VALUES ($1, $2, $3, $4, $5)",
     [id, tenant, userId, name, color],
   );
-  await client.query("INSERT INTO staff_branches (staff_id, branch_id, tenant_id) VALUES ($1, $2, $3)", [id, branch, tenant]);
-  for (let weekday = 1; weekday <= 7; weekday += 1) {
-    await client.query(
-      `INSERT INTO schedule_templates (id, tenant_id, branch_id, staff_id, weekday, start_min, end_min, kind)
-       VALUES ($1, $2, $3, $4, $5, 600, 1200, 'work')`,
-      [crypto.randomUUID(), tenant, branch, id, weekday],
-    );
+  for (const staffBranch of [branch, branch2]) {
+    await client.query("INSERT INTO staff_branches (staff_id, branch_id, tenant_id) VALUES ($1, $2, $3)", [id, staffBranch, tenant]);
+    for (let weekday = 1; weekday <= 7; weekday += 1) {
+      await client.query(
+        `INSERT INTO schedule_templates (id, tenant_id, branch_id, staff_id, weekday, start_min, end_min, kind)
+         VALUES ($1, $2, $3, $4, $5, 600, 1200, 'work')`,
+        [crypto.randomUUID(), tenant, staffBranch, id, weekday],
+      );
+    }
   }
 }
 

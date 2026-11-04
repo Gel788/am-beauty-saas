@@ -8,7 +8,7 @@ import { acquiringProviders } from "./acquiring";
 export async function listBranches(ctx: Ctx) {
   const rows = await many<BranchRow>(
     ctx.db,
-    "SELECT b.*, t.slug AS tenant_slug FROM branches b JOIN tenants t ON t.id = b.tenant_id ORDER BY b.created_at",
+    "SELECT b.*, t.slug AS tenant_slug FROM branches b JOIN tenants t ON t.id = b.tenant_id ORDER BY b.created_at, b.name",
   );
   return rows
     .filter((branch) => !ctx.actor.branchId || ctx.actor.branchId === branch.id || ctx.actor.role === "owner" || ctx.actor.role === "super")
