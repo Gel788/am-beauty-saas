@@ -159,6 +159,7 @@ import {
 import { handleTelegramUpdate, telegramSecretOk } from "@/server/telegram-bot";
 import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
 import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
+import { getCalendar, masterDay, periodReport, periodReportCsv } from "@/server/period";
 import type { Actor } from "@/server/types";
 import type { AppointmentStatus } from "@/domain/status";
 
@@ -322,6 +323,24 @@ async function handle(request: NextRequest, parts: string[]) {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => listMessages(ctx, branchId)));
   }
+  if (key === "GET reports/period" || key === "GET reports/period.csv") {
+    const query = Object.fromEntries(url.searchParams.entries());
+    query.branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    if (key === "GET reports/period") return NextResponse.json(await run((ctx) => periodReport(ctx, query)));
+    const file = await run((ctx) => periodReportCsv(ctx, query));
+    return new NextResponse(file.body, {
+      headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file.fileName}"` },
+    });
+  }
+  if (key === "GET journal/calendar") {
+    const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
+    return NextResponse.json(
+      await run((ctx) =>
+        getCalendar(ctx, { branchId, from: url.searchParams.get("from") ?? "", days: Number(url.searchParams.get("days") ?? 7), staffId: url.searchParams.get("staffId") }),
+      ),
+    );
+  }
+  if (key === "GET me/day") return NextResponse.json(await run((ctx) => masterDay(ctx, { date: url.searchParams.get("date") ?? undefined })));
   if (key === "GET reports/day") {
     const branchId = await resolveBranch(actor, url.searchParams.get("branchId"));
     return NextResponse.json(await run((ctx) => dayReport(ctx, branchId, url.searchParams.get("date") ?? "")));

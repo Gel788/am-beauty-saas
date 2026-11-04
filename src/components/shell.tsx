@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Banknote, BarChart3, Boxes, Gift, CalendarDays, LayoutDashboard, Scissors, Settings, Sparkles, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Boxes, Gift, CalendarDays, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
@@ -16,6 +16,7 @@ type Me = {
 
 const DESK = ["owner", "admin", "super"];
 const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: string; roles: string[]; masterLabel?: string }[] = [
+  { href: "/me", label: "Мой день", icon: Sun, roles: ["master"] },
   { href: "/journal", label: "Календарь", icon: CalendarDays, roles: [...DESK, "master"] },
   { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard, roles: DESK },
   { href: "/clients", label: "Клиенты", icon: Users, roles: [...DESK, "master"] },
@@ -25,7 +26,7 @@ const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: s
   { href: "/cash", label: "Финансы", icon: Wallet, roles: [...DESK, "accountant"] },
   { href: "/inventory", label: "Склад", icon: Boxes, roles: [...DESK, "accountant"] },
   { href: "/loyalty", label: "Лояльность", icon: Gift, roles: DESK },
-  { href: "/reports", label: "Отчёт дня", icon: BarChart3, roles: [...DESK, "accountant"] },
+  { href: "/reports", label: "Отчёты", icon: BarChart3, roles: [...DESK, "accountant", "master"], masterLabel: "Мои показатели" },
   { href: "/payroll", label: "Зарплаты", icon: Banknote, roles: [...DESK, "accountant", "master"], masterLabel: "Моя зарплата" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: DESK },
 ];

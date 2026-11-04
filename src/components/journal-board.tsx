@@ -9,6 +9,7 @@ import { addCalendarDays, todayInZone, weekdayLabel, zonedDateTimeToUtc } from "
 import { hitTestColumn, pointerIntent, resolveDrop } from "@/domain/grid";
 import { api, type ApiError } from "./api";
 import { RecordDrawer, type DrawerSeed } from "./record-drawer";
+import { CalendarRange } from "./calendar-range";
 import { portraitFor } from "./portraits";
 import { useToast } from "./ui";
 
@@ -366,7 +367,7 @@ export function JournalBoard() {
           <button className="btn-gradient" onClick={() => setSeed({ staffId: visibleStaff[0]?.id ?? "", startMin: dayStart, date })}>+ Запись</button>
         </div>
       </div>
-      {journal && (
+      {journal && view === "day" && (
         <div className="stat-row">
           <div className="stat-item"><span className="stat-ico"><CalendarDays size={15} /></span><div><b>{formatMoney(journal.stats.expectedRevenueMinor)}</b><span>ожидаемая выручка</span></div></div>
           <div className="stat-item"><span className="stat-ico"><Clock size={15} /></span><div><b>{journal.stats.loadPercent}%</b><span>загрузка дня</span></div></div>
@@ -375,7 +376,13 @@ export function JournalBoard() {
         </div>
       )}
       {view !== "day" ? (
-        <div className="panel empty">Неделя и месяц — следующая фаза. Сейчас работает дневной журнал.</div>
+        <CalendarRange
+          view={view}
+          branchId={branchId}
+          date={date}
+          onOpenDay={(day) => { setView("day"); go(day); }}
+          onOpenAppointment={(id, day) => { setView("day"); go(day); setSeed({ id, staffId: "", startMin: 0, date: day }); }}
+        />
       ) : (
         <div className="cal-scroll" ref={columnsRef}>
           {loading && !journal && <div className="skeleton" />}
