@@ -1,5 +1,6 @@
 "use client";
 
+import { Overlay } from "./ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatMoney, rublesToMinor } from "@/domain/money";
 import { todayInZone } from "@/domain/time";
@@ -376,6 +377,7 @@ function PeriodSheet({ id, role, money, onError, onBack }: { id: string; role: s
 function PaySlip({ sheet, item, money, onClose }: { sheet: Sheet; item: Item; money: (n: number) => string; onClose: () => void }) {
   const STATUS_TEXT: Record<string, string> = { draft: "черновик", calculated: "рассчитан", approved: "утверждён", paid: "выплачен", locked: "закрыт" };
   return (
+    <Overlay>
     <div className="modal-backdrop no-print-backdrop" onMouseDown={onClose}>
       <div className="payslip" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="Расчётный листок">
         <div className="spread no-print">
@@ -414,6 +416,7 @@ function PaySlip({ sheet, item, money, onClose }: { sheet: Sheet; item: Item; mo
         </div>
       </div>
     </div>
+    </Overlay>
   );
 }
 

@@ -5,7 +5,7 @@ import { Banknote, CreditCard, History, Landmark, Lock, LockOpen, Printer, QrCod
 import { formatMoney, rublesToMinor } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { METHOD_LABEL, PaymentRow, type PaymentItem } from "./payment-actions";
-import { Modal, useToast } from "./ui";
+import { Modal, useToast, Overlay } from "./ui";
 
 type Method = "cash" | "card" | "sbp" | "transfer";
 type Totals = {
@@ -455,6 +455,7 @@ function ZReport({ report, onClose, onChanged }: { report: Report; onClose: () =
   const { shift, payments } = report;
   const declared = useMemo(() => shift.declared ?? {}, [shift.declared]);
   return (
+    <Overlay>
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal zreport" role="dialog" aria-modal="true" aria-label="Z-отчёт" onMouseDown={(event) => event.stopPropagation()}>
         <div className="spread no-print">
@@ -497,6 +498,7 @@ function ZReport({ report, onClose, onChanged }: { report: Report; onClose: () =
         </div>
       </div>
     </div>
+    </Overlay>
   );
 }
 
