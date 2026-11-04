@@ -15,6 +15,7 @@ type Link = {
   expiresAt: string;
   paidAt: string | null;
   url?: string;
+  sent?: { status: "delivered" | "failed"; channel: string; error: string | null } | null;
 };
 
 const STATUS: Record<Link["status"], [string, string]> = {
@@ -33,6 +34,7 @@ export function PayLinkBlock({ appointmentId, dueMinor, onPaid }: { appointmentI
   const [fresh, setFresh] = useState<Record<string, string>>({});
   const [rub, setRub] = useState("");
   const [busy, setBusy] = useState(false);
+  const [send, setSend] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -80,13 +82,15 @@ export function PayLinkBlock({ appointmentId, dueMinor, onPaid }: { appointmentI
               try {
                 const link = await api<Link>(`/api/appointments/${appointmentId}/pay-links`, {
                   method: "POST",
-                  body: JSON.stringify({ amountMinor: rublesToMinor(Number(rub.replace(",", "."))) }),
+                  body: JSON.stringify({ amountMinor: rublesToMinor(Number(rub.replace(",", "."))), send }),
                 });
                 if (link.url) {
                   setFresh((map) => ({ ...map, [link.id]: link.url! }));
                   navigator.clipboard?.writeText(link.url).catch(() => undefined);
                 }
-                toast("Ссылка создана и скопирована");
+                if (link.sent?.status === "failed") toast(`Ссылка скопирована, но не отправлена: ${link.sent.error}`, "error");
+                else if (link.sent) toast(link.sent.channel === "log" ? "Ссылка скопирована и записана в журнал сообщений" : "Ссылка отправлена клиенту и скопирована");
+                else toast("Ссылка создана и скопирована");
                 await load();
               } catch (error) {
                 toast((error as ApiError).message, "error");
@@ -97,6 +101,9 @@ export function PayLinkBlock({ appointmentId, dueMinor, onPaid }: { appointmentI
           >
             Создать ссылку
           </button>
+          <label className="row" style={{ gap: 4, fontSize: 12 }}>
+            <input type="checkbox" checked={send} onChange={(event) => setSend(event.target.checked)} /> отправить клиенту
+          </label>
         </div>
       )}
       {shown.map((link) => (

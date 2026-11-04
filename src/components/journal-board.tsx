@@ -94,6 +94,19 @@ export function JournalBoard() {
       setBranchId(branch.id);
       setTimezone(branch.timezone);
       setDate(params.get("date") || todayInZone(branch.timezone));
+      // A notification links straight to the visit: /journal?open=<appointment id>.
+      const open = params.get("open");
+      if (open) {
+        api<{ id: string; startsAt: string; branchId: string }>(`/api/appointments/${open}`)
+          .then((appt) => {
+            const tz = me.branches.find((item) => item.id === appt.branchId)?.timezone ?? branch.timezone;
+            const day = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(appt.startsAt));
+            if (appt.branchId !== branch.id) setBranchId(appt.branchId);
+            setDate(day);
+            setSeed({ id: appt.id, staffId: "", startMin: 0, date: day });
+          })
+          .catch(() => undefined);
+      }
     }).catch((err: ApiError) => setError(err.message));
   }, [params]);
 

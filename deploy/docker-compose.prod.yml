@@ -40,6 +40,12 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://app_user:${APP_DB_PASSWORD}@postgres:5432/ambeauty
       JOBS_TOKEN: ${JOBS_TOKEN:?set JOBS_TOKEN in deploy/.env}
+      PUBLIC_URL: https://${DOMAIN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      SMS_RU_API_KEY: ${SMS_RU_API_KEY:-}
+      SMS_SENDER: ${SMS_SENDER:-}
 
   caddy:
     image: caddy:2

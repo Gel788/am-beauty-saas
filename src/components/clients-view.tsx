@@ -6,6 +6,7 @@ import { formatPhone } from "@/domain/phone";
 import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
 import { api, type ApiError } from "./api";
 import { initials, useToast } from "./ui";
+import { ClientComms } from "./client-comms";
 
 type Client = {
   id: string;
@@ -156,6 +157,7 @@ export function ClientsView() {
               )}
             </form>
           )}
+          {selected && !creating && <ClientComms clientId={selected.id} />}
         </div>
       </div>
     </>

@@ -30,6 +30,7 @@ type Booking = {
   promo: { code: string; discountMinor: number } | null;
   cancelToken: string;
   cancelUntil: string;
+  telegramUrl: string | null;
 };
 type Failure = Error & { code?: string; details?: { reason?: string } | null };
 
@@ -84,7 +85,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
   const [hold, setHold] = useState<Hold | null>(null);
   const [busy, setBusy] = useState(false);
   const [booking, setBooking] = useState<Booking | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", comment: "", promo: "", website: "" });
+  const [form, setForm] = useState({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false });
   const idempotencyKey = useRef<string>("");
 
   useEffect(() => {
@@ -173,7 +174,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
     try {
       const result = await call<Booking>(`${base}/bookings`, {
         method: "POST",
-        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, idempotencyKey: idempotencyKey.current }),
+        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, consent: form.consent, marketing: form.marketing, idempotencyKey: idempotencyKey.current }),
       });
       setBooking(result);
       setHold(null);
@@ -319,6 +320,14 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
               <label>Телефон<input required type="tel" autoComplete="tel" placeholder="+7 900 000-00-00" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
               <label>Комментарий<textarea rows={2} value={form.comment} onChange={(event) => setForm({ ...form, comment: event.target.value })} /></label>
               <label>Промокод<input autoComplete="off" value={form.promo} onChange={(event) => setForm({ ...form, promo: event.target.value.toUpperCase() })} /></label>
+              <label className="bk-consent">
+                <input type="checkbox" required checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} />
+                <span>Согласен(на) на обработку персональных данных по <a href={`/b/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(branchSlug)}/privacy`} target="_blank" rel="noreferrer">политике</a> салона</span>
+              </label>
+              <label className="bk-consent">
+                <input type="checkbox" checked={form.marketing} onChange={(event) => setForm({ ...form, marketing: event.target.checked })} />
+                <span>Хочу получать акции и новости салона</span>
+              </label>
               <input className="bk-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
               <button className="bk-primary" type="submit" disabled={busy}>{busy ? "Записываем…" : "Записаться"}</button>
               <button className="bk-link" type="button" onClick={() => backToSlots()}>Назад к выбору времени</button>
@@ -337,7 +346,12 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
               Отменить запись можно до {formatWhen(booking.cancelUntil, tz)} по ссылке:{" "}
               <a href={`/booking/${booking.cancelToken}`} target="_top">управление записью</a>. Сохраните её.
             </p>
-            <button className="bk-link" onClick={() => { setBooking(null); setService(null); setForm({ name: "", phone: "", comment: "", promo: "", website: "" }); setStep(1); }}>
+            {booking.telegramUrl && (
+              <a className="bk-telegram" href={booking.telegramUrl} target="_blank" rel="noreferrer">
+                Получать напоминания в Telegram
+              </a>
+            )}
+            <button className="bk-link" onClick={() => { setBooking(null); setService(null); setForm({ name: "", phone: "", comment: "", promo: "", website: "", consent: false, marketing: false }); setStep(1); }}>
               Записаться ещё
             </button>
           </section>

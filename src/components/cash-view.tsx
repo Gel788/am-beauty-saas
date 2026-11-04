@@ -68,6 +68,9 @@ export function CashView() {
   const toast = useToast();
   const [me, setMe] = useState<Me | null>(null);
   const [tab, setTab] = useState<"shift" | "history" | "receipts">("shift");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "receipts") setTab("receipts");
+  }, []);
   const [failedReceipts, setFailedReceipts] = useState(0);
   const [shift, setShift] = useState<Shift | null>(null);
   const [payments, setPayments] = useState<PaymentItem[]>([]);

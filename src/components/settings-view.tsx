@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
+import { MessagingSettings } from "./messaging-settings";
 
 type Branch = {
   id: string;
@@ -31,6 +32,7 @@ type Branch = {
   onlineAccent: string;
   reminderEnabled: boolean;
   reminderHours: number;
+  bookingMessageEnabled: boolean;
   consumePolicy: "warn" | "block";
   allowNegativeStock: boolean;
   fiscalEnabled: boolean;
@@ -48,8 +50,9 @@ type Branch = {
 export function SettingsView() {
   const toast = useToast();
   const [branch, setBranch] = useState<Branch | null>(null);
+  const [role, setRole] = useState("admin");
   useEffect(() => {
-    api<{ branches: Branch[] }>("/api/auth/me").then((me) => setBranch(me.branches[0] ?? null)).catch((error: ApiError) => toast(error.message, "error"));
+    api<{ branches: Branch[]; actor: { role: string } }>("/api/auth/me").then((me) => { setBranch(me.branches[0] ?? null); setRole(me.actor.role); }).catch((error: ApiError) => toast(error.message, "error"));
   }, [toast]);
   if (!branch) return <div className="skeleton" />;
   const set = <K extends keyof Branch>(key: K, value: Branch[K]) => setBranch({ ...branch, [key]: value });
@@ -85,7 +88,7 @@ export function SettingsView() {
       </form>
       <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
-      <ReminderSettings branch={branch} onSaved={setBranch} />
+      <MessagingSettings branch={branch} role={role} onSaved={setBranch} />
       <StockSettings branch={branch} onSaved={setBranch} />
     </>
   );
@@ -288,7 +291,6 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
   );
 }
 
-type Message = { id: string; channel: string; recipient: string; body: string; status: string; error: string | null; createdAt: string; clientName: string | null };
 
 function StockSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
   const toast = useToast();
@@ -325,55 +327,3 @@ function StockSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: 
   );
 }
 
-function ReminderSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: Branch) => void }) {
-  const toast = useToast();
-  const [enabled, setEnabled] = useState(branch.reminderEnabled);
-  const [hours, setHours] = useState(branch.reminderHours);
-  const [messages, setMessages] = useState<Message[] | null>(null);
-  useEffect(() => {
-    setEnabled(branch.reminderEnabled);
-    setHours(branch.reminderHours);
-  }, [branch]);
-  useEffect(() => {
-    api<Message[]>(`/api/messages?branchId=${branch.id}`).then(setMessages).catch(() => setMessages([]));
-  }, [branch.id]);
-  return (
-    <form
-      className="panel list"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        try {
-          onSaved(await api<Branch>(`/api/branches/${branch.id}`, { method: "PATCH", body: JSON.stringify({ reminderEnabled: enabled, reminderHours: hours }) }));
-          toast("Напоминания сохранены");
-        } catch (error) {
-          toast((error as ApiError).message, "error");
-        }
-      }}
-    >
-      <h2 style={{ margin: 0 }}>Напоминания клиентам</h2>
-      <span className="muted" style={{ fontSize: 13 }}>
-        Канал отправки пока не подключён: напоминания формируются по расписанию и записываются в журнал ниже. С 22:00 до 09:00 по времени филиала они не уходят и ждут утра.
-      </span>
-      <label className="row"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Напоминать о визите</label>
-      <div className="field"><label>За сколько часов до визита</label><input type="number" min={1} max={168} value={hours} onChange={(event) => setHours(Number(event.target.value))} /></div>
-      <button className="btn-gradient" type="submit">Сохранить напоминания</button>
-      <h3 style={{ margin: "8px 0 0", fontSize: 14 }}>Журнал сообщений</h3>
-      {!messages && <div className="skeleton" />}
-      {messages?.length === 0 && <span className="muted">Сообщений пока не было</span>}
-      {messages?.map((message) => (
-        <div key={message.id} className="list" style={{ gap: 2, paddingBottom: 8, borderBottom: "1px solid var(--line)" }}>
-          <div className="spread">
-            <b>{message.clientName ?? message.recipient}</b>
-            <span className={`tag ${message.status === "delivered" ? "tag-ok" : "tag-bad"}`}>
-              {message.status === "delivered" ? (message.channel === "log" ? "в журнале" : message.channel) : "не отправлено"}
-            </span>
-          </div>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {new Date(message.createdAt).toLocaleString("ru-RU")} · {message.recipient}{message.error ? ` · ${message.error}` : ""}
-          </span>
-          <span style={{ fontSize: 13 }}>{message.body}</span>
-        </div>
-      ))}
-    </form>
-  );
-}

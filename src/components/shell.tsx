@@ -7,6 +7,7 @@ import { Banknote, BarChart3, Boxes, Gift, CalendarDays, LayoutDashboard, Scisso
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
+import { Notifications } from "./notifications";
 
 type Me = {
   actor: { name: string; role: string };
@@ -91,6 +92,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
+          {me && (DESK.includes(me.actor.role) || me.actor.role === "accountant") && <Notifications />}
           <div className="side-grow" />
           <div className="ai-week">
             <p>AI на этой неделе</p>

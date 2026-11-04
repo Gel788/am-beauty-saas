@@ -14,13 +14,14 @@ type Booking = {
   priceMinor: number;
   cancelUntil: string;
   canCancel: boolean;
-  outcome?: "cancelled" | "requested" | "already_cancelled";
+  canConfirm: boolean;
+  outcome?: "cancelled" | "requested" | "already_cancelled" | "confirmed" | "already_confirmed";
   branch: { name: string; address: string; timezone: string; currency: string; accent: string };
 };
 
 const STATUS: Record<string, string> = {
-  scheduled: "Запись подтверждена",
-  confirmed: "Запись подтверждена",
+  scheduled: "Вы записаны",
+  confirmed: "Визит подтверждён",
   arrived: "Вы в салоне",
   in_progress: "Визит идёт",
   completed: "Визит завершён",
@@ -43,6 +44,20 @@ export function BookingManage({ token }: { token: string }) {
       })
       .catch((failure: Error) => setError(failure.message));
   }, [token]);
+
+  async function confirm() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/public/booking/${encodeURIComponent(token)}/confirm`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error?.message ?? "Не получилось подтвердить");
+      setBooking(body);
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function cancel() {
     setBusy(true);
@@ -83,11 +98,15 @@ export function BookingManage({ token }: { token: string }) {
           {booking.outcome === "requested" && (
             <div className="bk-notice">Отменить онлайн уже поздно, поэтому мы передали вашу просьбу администратору. С вами свяжутся.</div>
           )}
+          {booking.outcome === "confirmed" && <div className="bk-notice bk-ok">Спасибо! Ждём вас.</div>}
+          {booking.canConfirm && (
+            <button className="bk-primary" style={{ marginTop: 12 }} disabled={busy} onClick={confirm}>{busy ? "Подтверждаем…" : "Подтверждаю, приду"}</button>
+          )}
           {active && booking.canCancel && (
             <div className="bk-form">
               <p className="bk-muted">Отменить можно до {formatWhen(booking.cancelUntil, tz)}.</p>
               <label>Причина (необязательно)<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-              <button className="bk-primary" disabled={busy} onClick={cancel}>{busy ? "Отменяем…" : "Отменить запись"}</button>
+              <button className={booking.canConfirm ? "bk-link" : "bk-primary"} disabled={busy} onClick={cancel}>{busy ? "Отменяем…" : "Отменить запись"}</button>
             </div>
           )}
           {active && !booking.canCancel && booking.outcome !== "requested" && (

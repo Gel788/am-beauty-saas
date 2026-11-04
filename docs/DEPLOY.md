@@ -28,6 +28,19 @@ curl https://<домен>/api/health   # {"ok":true,"db":true}
 
 Демо-данные (`npm run db:seed`) на боевом сервере не загружаются. Первый салон создаётся на странице `/register`.
 
+## Сообщения клиентам
+
+Без настроек сообщения только записываются в журнал. Чтобы они уходили клиентам:
+
+1. **Telegram.** Создайте бота у @BotFather, впишите `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` (без @) и случайный `TELEGRAM_WEBHOOK_SECRET` в `deploy/.env`, перезапустите `app` и зарегистрируйте вебхук:
+   ```sh
+   curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+     -d url="https://$DOMAIN/api/webhooks/telegram" -d secret_token="$TELEGRAM_WEBHOOK_SECRET" \
+     -d allowed_updates='["message","callback_query"]'
+   ```
+2. **SMS.** Зарегистрируйтесь в SMS.ru, впишите `SMS_RU_API_KEY` (и согласованное имя отправителя в `SMS_SENDER`).
+3. Владелец салона включает каналы и их порядок в «Настройки → Сообщения клиентам».
+
 ## Обновление
 
 ```bash
