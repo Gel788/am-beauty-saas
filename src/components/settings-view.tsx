@@ -5,6 +5,7 @@ import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 import { MessagingSettings } from "./messaging-settings";
 import { IntegrationsSettings } from "./integrations-settings";
+import { ApiSettings } from "./api-settings";
 import { FieldsSettings, ResourcesSettings } from "./resources-fields-settings";
 
 type Branch = {
@@ -91,6 +92,7 @@ export function SettingsView() {
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
       {(role === "owner" || role === "super") && <IntegrationsSettings />}
+      {(role === "owner" || role === "super") && <ApiSettings />}
       <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />
       <MessagingSettings branch={branch} role={role} onSaved={setBranch} />
