@@ -63,6 +63,7 @@ export function Notifications() {
     if (item.entity === "appointment" && item.entityId) router.push(`/journal?open=${item.entityId}`);
     else if (item.kind === "fiscal.failed") router.push("/cash?tab=receipts");
     else if (item.entity === "schedule_request") router.push("/staff");
+    else if (item.entity === "client" && item.entityId) router.push(`/clients?open=${item.entityId}`);
   }
 
   return (
