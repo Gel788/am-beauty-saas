@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Banknote, BarChart3, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
 import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
+import { MiniCalendar } from "./mini-calendar";
 
 type Me = {
   actor: { name: string; role: string };
-  branches: { id: string; name: string; address: string }[];
+  branches: { id: string; name: string; address: string; timezone: string }[];
 };
 
 const DESK = ["owner", "admin", "super"];
@@ -97,11 +98,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
           {me && (DESK.includes(me.actor.role) || me.actor.role === "accountant") && <Notifications />}
           <div className="side-grow" />
-          <div className="ai-week">
-            <p>AI на этой неделе</p>
-            <b>142</b>
-            <small>ответа · ≈ 11 часов администратора</small>
-          </div>
+          {me && me.actor.role !== "accountant" ? (
+            <Suspense fallback={null}>
+              <MiniCalendar timezone={branch?.timezone ?? "Europe/Moscow"} />
+            </Suspense>
+          ) : (
+            <div className="ai-week">
+              <p>AI на этой неделе</p>
+              <b>142</b>
+              <small>ответа · ≈ 11 часов администратора</small>
+            </div>
+          )}
           {me && (
             <div className="user-row">
               <img className="face" src={ownerPhoto} alt="" />

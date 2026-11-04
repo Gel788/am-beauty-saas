@@ -775,3 +775,23 @@ h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spac
 .bk-deposit { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; padding: 14px; border-radius: 14px; background: color-mix(in srgb, var(--bk-accent) 8%, white); }
 .bk-deposit p { margin: 0; }
 a.bk-primary { display: block; text-align: center; text-decoration: none; }
+
+/* Sidebar month calendar: jump to a day in the journal */
+.sidebar { overflow-y: auto; scrollbar-width: thin; }
+.sidebar > * { flex-shrink: 0; }
+.mini-cal { margin: 8px 2px 10px; padding: 10px 8px 8px; border-radius: 16px; background: rgba(255,255,255,0.72); box-shadow: 0 8px 20px rgba(120, 70, 150, 0.06); }
+.mini-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.mini-cal-head button { border: 0; background: transparent; color: #514860; border-radius: 8px; padding: 2px 4px; display: grid; place-items: center; cursor: pointer; }
+.mini-cal-head button svg { width: 16px; height: 16px; }
+.mini-cal-head button:hover { background: rgba(124, 92, 255, 0.08); }
+.mini-cal-title { font-size: 12.5px; font-weight: 650; text-transform: capitalize; color: var(--ink) !important; }
+.mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.mini-cal-wd { font-size: 10px; color: var(--faint); text-align: center; padding: 2px 0; }
+.mini-cal-day { border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--ink); height: 24px; border-radius: 8px; cursor: pointer; padding: 0; }
+.mini-cal-day:hover { background: rgba(124, 92, 255, 0.1); }
+.mini-cal-day.out { color: var(--faint); }
+.mini-cal-day.today { color: #7c5cff; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.35); }
+.mini-cal-day.on { background: linear-gradient(135deg, #7c5cff, #ff4d8d); color: white; font-weight: 700; box-shadow: none; }
+.mini-cal-today { display: block; width: 100%; margin-top: 6px; border: 0; background: rgba(124, 92, 255, 0.08); color: #6d4fe0; border-radius: 10px; padding: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
+@media (max-width: 980px) { .mini-cal { display: none; } }
+@media (max-height: 900px) and (min-width: 981px) { .nav-item { padding: 5px 10px; font-size: 13.5px; } .wordmark { padding-bottom: 8px; } .salon-switch { margin-bottom: 8px; } }
