@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoice, platformUpdateTenant, sandboxPayInvoice } from "@/server/billing";
+import bcrypt from "bcryptjs";
+import { login, platformUserFromToken } from "@/server/auth";
 import { pool } from "@/server/db";
 import { platformCreateTask, platformDeleteTask, platformEvents, platformInvoices, platformOverview, platformSetTaskDone, platformTasks, platformTenantDetail } from "@/server/platform";
 import { bindTestDb, createSalon, run } from "./helpers";
@@ -77,5 +79,23 @@ describe("platform cabinet", () => {
     const feed = await platformEvents(salon.owner, 500);
     const mine = feed.filter((item) => item.tenantId === salon.tenantId);
     expect(mine.some((item) => item.kind === "action" && item.text.includes("продлено на 7 дн."))).toBe(true);
+  });
+
+  it("PLAT-CABINET-05 the platform owner signs in without a salon; a salon owner off the list cannot open the cabinet", async () => {
+    const email = `platform-${crypto.randomUUID().slice(0, 8)}@test.local`;
+    await pool.query("INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, 'Платформа')", [crypto.randomUUID(), email, bcrypt.hashSync("secret-pass", 4)]);
+    const before = process.env.PLATFORM_ADMIN_EMAILS;
+    try {
+      process.env.PLATFORM_ADMIN_EMAILS = "";
+      await expect(login(email, "secret-pass")).rejects.toMatchObject({ code: "FORBIDDEN" });
+      process.env.PLATFORM_ADMIN_EMAILS = email;
+      const signed = await login(email, "secret-pass");
+      expect(signed).toMatchObject({ actor: null, platform: true });
+      expect(await platformUserFromToken(signed.token)).toMatchObject({ email });
+      const owner = await login(salon.owner.email, "ambeauty").catch(() => null);
+      if (owner) expect(await platformUserFromToken(owner.token)).toBeNull();
+    } finally {
+      process.env.PLATFORM_ADMIN_EMAILS = before;
+    }
   });
 });

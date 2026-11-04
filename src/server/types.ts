@@ -12,6 +12,9 @@ export type Actor = {
   email: string;
 };
 
+/** Someone on the platform team: a person, not tied to any salon. */
+export type PlatformActor = Pick<Actor, "userId" | "name" | "email">;
+
 export type Ctx = {
   db: PoolClient;
   actor: Actor;

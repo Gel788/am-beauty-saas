@@ -29,7 +29,7 @@ import {
 } from "@/server/retention";
 import { NextRequest, NextResponse } from "next/server";
 import { AppError, isAppError } from "@/domain/errors";
-import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
+import { actorFromToken, asActor, platformUserFromToken, getDensity, login, logout, register, setDensity } from "@/server/auth";
 import {
   cancelAppointment,
   changeStatus,
@@ -260,7 +260,7 @@ async function handle(request: NextRequest, parts: string[]) {
   if (key === "POST auth/login") {
     const body = await readJson(request);
     const result = await login(String(body.email ?? ""), String(body.password ?? ""));
-    return cookie(NextResponse.json({ actor: result.actor }), result.token);
+    return cookie(NextResponse.json({ actor: result.actor, platform: result.platform }), result.token);
   }
   if (key === "POST auth/register") {
     const body = await readJson(request);
@@ -280,6 +280,28 @@ async function handle(request: NextRequest, parts: string[]) {
     const response = NextResponse.json({ ok: true });
     response.cookies.set("ab_session", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;
+  }
+  // PLAT-CABINET-05: the platform cabinet has its own sign-in check and never touches a salon.
+  if (parts[0] === "platform") {
+    const token = request.cookies.get("ab_session")?.value;
+    const platformActor = await platformUserFromToken(token);
+    if (!platformActor) return NextResponse.json({ error: { code: "FORBIDDEN", message: token ? "Раздел для команды платформы" : "Войдите" } }, { status: token ? 403 : 401 });
+    if (key === "GET platform/me") return NextResponse.json({ name: platformActor.name, email: platformActor.email });
+    if (key === "GET platform/tenants") return NextResponse.json(await platformTenants(platformActor));
+    if (key === "GET platform/overview") return NextResponse.json(await platformOverview(platformActor));
+    if (key === "GET platform/invoices") return NextResponse.json(await platformInvoices(platformActor));
+    if (key === "GET platform/events") return NextResponse.json(await platformEvents(platformActor, Number(url.searchParams.get("limit") ?? 100)));
+    if (key === "GET platform/tasks") return NextResponse.json(await platformTasks(platformActor));
+    if (key === "POST platform/tasks") return NextResponse.json(await platformCreateTask(platformActor, await readJson(request)), { status: 201 });
+    if (parts[0] === "platform" && parts[1] === "tasks" && parts[2] && parts.length === 3) {
+      if (method === "PATCH") return NextResponse.json(await platformSetTaskDone(platformActor, parts[2], (await readJson(request)).done));
+      if (method === "DELETE") return NextResponse.json(await platformDeleteTask(platformActor, parts[2]));
+    }
+    if (method === "GET" && parts[0] === "platform" && parts[1] === "tenants" && parts[2] && parts.length === 3) return NextResponse.json(await platformTenantDetail(platformActor, parts[2]));
+    if (method === "PATCH" && parts[0] === "platform" && parts[1] === "tenants" && parts[2]) {
+      return NextResponse.json(await platformUpdateTenant(platformActor, parts[2], await readJson(request)));
+    }
+    return NextResponse.json({ error: { code: "NOT_FOUND", message: "Нет такого раздела" } }, { status: 404 });
   }
 
   if (parts[0] === "public") return handlePublic(request, parts.slice(1));
@@ -417,20 +439,6 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (method === "POST" && parts[0] === "billing" && parts[1] === "invoices" && parts[2] && parts[3] === "sandbox-pay") {
     return NextResponse.json(await asActor(actor, (ctx) => sandboxPayInvoice(ctx, parts[2])));
-  }
-  if (key === "GET platform/tenants") return NextResponse.json(await platformTenants(actor));
-  if (key === "GET platform/overview") return NextResponse.json(await platformOverview(actor));
-  if (key === "GET platform/invoices") return NextResponse.json(await platformInvoices(actor));
-  if (key === "GET platform/events") return NextResponse.json(await platformEvents(actor, Number(url.searchParams.get("limit") ?? 100)));
-  if (key === "GET platform/tasks") return NextResponse.json(await platformTasks(actor));
-  if (key === "POST platform/tasks") return NextResponse.json(await platformCreateTask(actor, await readJson(request)), { status: 201 });
-  if (parts[0] === "platform" && parts[1] === "tasks" && parts[2] && parts.length === 3) {
-    if (method === "PATCH") return NextResponse.json(await platformSetTaskDone(actor, parts[2], (await readJson(request)).done));
-    if (method === "DELETE") return NextResponse.json(await platformDeleteTask(actor, parts[2]));
-  }
-  if (method === "GET" && parts[0] === "platform" && parts[1] === "tenants" && parts[2] && parts.length === 3) return NextResponse.json(await platformTenantDetail(actor, parts[2]));
-  if (method === "PATCH" && parts[0] === "platform" && parts[1] === "tenants" && parts[2]) {
-    return NextResponse.json(await platformUpdateTenant(actor, parts[2], await readJson(request)));
   }
   if (key === "PUT preferences") {
     const body = await readJson(request);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatMoney } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
@@ -52,6 +53,28 @@ const today = () => new Date().toISOString().slice(0, 10);
 const TABS = [["overview", "Сводка"], ["tenants", "Салоны"], ["invoices", "Оплаты"], ["tasks", "Дела"], ["events", "События"]] as const;
 type Tab = (typeof TABS)[number][0];
 
+/** PLAT-CABINET-05: the platform owner's own frame — no salon menu, no salon data. */
+export function PlatformShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [me, setMe] = useState<{ name: string; email: string } | null>(null);
+  useEffect(() => {
+    api<{ name: string; email: string }>("/api/platform/me").then(setMe).catch(() => router.replace("/login"));
+  }, [router]);
+  return (
+    <div className="plat-app">
+      <header className="plat-top">
+        <div className="wordmark"><span className="am">Am</span><span className="beauty">BEAUTY</span></div>
+        <span className="plat-badge">Платформа</span>
+        <div className="plat-top-user">
+          {me && <span className="muted">{me.name} · {me.email}</span>}
+          <button type="button" className="btn-ghost" onClick={async () => { await api("/api/auth/logout", { method: "POST" }); router.push("/login"); }}>Выйти</button>
+        </div>
+      </header>
+      <main className="plat-main">{me ? children : <div className="skeleton" />}</main>
+    </div>
+  );
+}
+
 /** PLAT-CABINET-*: the platform owner's cabinet — subscriptions, money, risk, to-dos, events. */
 export function PlatformView() {
   const toast = useToast();
@@ -99,7 +122,7 @@ export function PlatformView() {
   return (
     <div className="reports-page platform">
       <div className="journal-top">
-        <div><div className="page-kicker">Кабинет владельца платформы</div><h1 className="date-title">Платформа</h1></div>
+        <div><div className="page-kicker">Кабинет владельца платформы</div><h1 className="date-title">Подписки и салоны</h1></div>
         <div className="segment">
           {TABS.map(([value, label]) => (
             <button key={value} type="button" className={tab === value ? "on" : ""} onClick={() => setTab(value)}>
