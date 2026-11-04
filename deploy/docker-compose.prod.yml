@@ -90,6 +90,7 @@ services:
           curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/reminders >/dev/null || echo "reminders job failed"
           curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/fiscal >/dev/null || echo "fiscal job failed"
           curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/retention >/dev/null || echo "retention job failed"
+          curl -fsS -X POST -H "x-jobs-token: $$JOBS_TOKEN" http://app:3000/api/jobs/webhooks >/dev/null || echo "webhooks job failed"
           sleep 300
         done
 
