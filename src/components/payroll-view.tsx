@@ -37,7 +37,7 @@ type Item = {
   lines: Line[];
 };
 type Sheet = { id: string; startsOn: string; endsOn: string; status: Status; warnings: { code: string; message: string }[]; items: Item[] };
-type Rule = {
+export type Rule = {
   id: string;
   staffId: string | null;
   serviceId: string | null;
@@ -69,7 +69,7 @@ const SCHEMES: Record<Rule["scheme"], string> = {
   hybrid: "Оклад + процент",
 };
 /** What the owner picks; each kind maps to a scheme and, for shift pay, period «shift». */
-const KINDS = {
+export const KINDS = {
   percent: { label: "Процент с услуги", scheme: "percent", shift: false, guarantee: false },
   shift: { label: "За выход", scheme: "salary", shift: true, guarantee: false },
   shift_percent: { label: "За выход + процент", scheme: "hybrid", shift: true, guarantee: false },
@@ -78,8 +78,8 @@ const KINDS = {
   salary: { label: "Оклад", scheme: "salary", shift: false, guarantee: false },
   hybrid: { label: "Оклад + процент", scheme: "hybrid", shift: false, guarantee: false },
 } as const;
-type Kind = keyof typeof KINDS;
-const kindOf = (rule: Rule) =>
+export type Kind = keyof typeof KINDS;
+export const kindOf = (rule: Rule) =>
   rule.periodUnit === "shift" ? (rule.scheme === "salary" ? "За выход" : rule.guarantee ? "Процент, но не меньше ставки за выход" : "За выход + процент") : SCHEMES[rule.scheme];
 const UNITS: Record<Exclude<Rule["periodUnit"], "shift">, string> = { month: "в месяц", biweekly: "за 2 недели", week: "в неделю" };
 const LINE_TYPES: Record<string, string> = {
@@ -94,6 +94,17 @@ const LINE_TYPES: Record<string, string> = {
 };
 const lineType = (line: { type: string; rate?: unknown }) =>
   line.type === "salary" && (line.rate as { periodUnit?: string } | null)?.periodUnit === "shift" ? "Выходы" : LINE_TYPES[line.type] ?? line.type;
+export function describeRule(rule: Rule, money: (minor: number) => string) {
+  const parts: string[] = [];
+  if (rule.scheme === "percent" || rule.scheme === "hybrid") parts.push(`${rule.percentBps / 100}% ${rule.base === "paid_amount" ? "от оплаченного" : "от цены"}`);
+  if (rule.scheme === "fixed_per_service") parts.push(`${money(rule.fixedMinor)} за услугу`);
+  if ((rule.scheme === "salary" || rule.scheme === "hybrid") && rule.periodUnit === "shift") parts.push(`${money(rule.salaryMinor)} за выход${rule.guarantee ? " (минимум)" : ""}`);
+  else if (rule.scheme === "salary" || rule.scheme === "hybrid") parts.push(`оклад ${money(rule.salaryMinor)} ${UNITS[rule.periodUnit as keyof typeof UNITS]}`);
+  if (rule.deductMaterials) parts.push("за вычетом материалов");
+  if (!rule.includeTips) parts.push("без чаевых");
+  return parts.join(", ");
+}
+
 const SETUP = ["owner", "admin", "accountant", "super"];
 const MONEY = ["owner", "accountant", "super"];
 
@@ -537,16 +548,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
     }
   }
 
-  function describe(rule: Rule) {
-    const parts: string[] = [];
-    if (rule.scheme === "percent" || rule.scheme === "hybrid") parts.push(`${rule.percentBps / 100}% ${rule.base === "paid_amount" ? "от оплаченного" : "от цены"}`);
-    if (rule.scheme === "fixed_per_service") parts.push(`${money(rule.fixedMinor)} за услугу`);
-    if ((rule.scheme === "salary" || rule.scheme === "hybrid") && rule.periodUnit === "shift") parts.push(`${money(rule.salaryMinor)} за выход${rule.guarantee ? " (минимум)" : ""}`);
-    else if (rule.scheme === "salary" || rule.scheme === "hybrid") parts.push(`оклад ${money(rule.salaryMinor)} ${UNITS[rule.periodUnit as keyof typeof UNITS]}`);
-    if (rule.deductMaterials) parts.push("за вычетом материалов");
-    if (!rule.includeTips) parts.push("без чаевых");
-    return parts.join(", ");
-  }
+
 
   return (
     <>
@@ -612,7 +614,7 @@ function Rules({ money, onError }: { money: (n: number) => string; onError: (m: 
               <tr key={rule.id}>
                 <td>{staffName(rule.staffId)}{rule.serviceId && <span className="muted"> · {serviceName(rule.serviceId)}</span>}</td>
                 <td>{kindOf(rule)}</td>
-                <td>{describe(rule)}</td>
+                <td>{describeRule(rule, money)}</td>
                 <td className="muted">с {dayLabel(rule.validFrom)}{rule.validTo ? ` по ${dayLabel(rule.validTo)}` : ""}</td>
                 <td className="num"><button className="btn danger" onClick={() => remove(rule.id)}>Удалить</button></td>
               </tr>
