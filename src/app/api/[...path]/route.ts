@@ -133,6 +133,7 @@ import {
   asOnline,
   cancelBooking,
   confirmBooking,
+  confirmVisit,
   createHold,
   getBooking,
   listSlots,
@@ -142,6 +143,20 @@ import {
   resolvePublicBranch,
 } from "@/server/booking";
 import { listBranches, updateBranch, updateTenantSlug } from "@/server/settings";
+import {
+  clientMessages,
+  listNotifications,
+  markNotificationsRead,
+  messagingSettings,
+  privacyInfo,
+  saveTemplate,
+  sendManual,
+  telegramLink,
+  unlinkSelfTelegram,
+  updateConsents,
+  updateMessagingSettings,
+} from "@/server/messaging";
+import { handleTelegramUpdate, telegramSecretOk } from "@/server/telegram-bot";
 import type { Actor } from "@/server/types";
 import type { AppointmentStatus } from "@/domain/status";
 
@@ -254,6 +269,19 @@ async function handle(request: NextRequest, parts: string[]) {
     const result = await handleWebhook(parts[2], await readJson(request), request.headers);
     void runFiscalJob().catch((error) => console.error("fiscal", error));
     return NextResponse.json(result);
+  }
+
+  if (key === "POST webhooks/telegram") {
+    if (!telegramSecretOk(request.headers.get("x-telegram-bot-api-secret-token"))) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    }
+    // Telegram retries on errors; a broken update must not loop forever.
+    try {
+      await handleTelegramUpdate(await readJson(request));
+    } catch (error) {
+      console.error("telegram", error);
+    }
+    return NextResponse.json({ ok: true });
   }
 
   const actor = await actorFromToken(request.cookies.get("ab_session")?.value);
@@ -525,6 +553,51 @@ async function handle(request: NextRequest, parts: string[]) {
     );
   }
 
+  if (key === "GET notifications") return NextResponse.json(await run((ctx) => listNotifications(ctx)));
+  if (key === "POST notifications/read") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => markNotificationsRead(ctx, Array.isArray(body.ids) ? body.ids.map(String) : undefined)));
+  }
+  if (key === "GET messaging") return NextResponse.json(await run((ctx) => messagingSettings(ctx)));
+  if (key === "PATCH messaging") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => updateMessagingSettings(ctx, body)));
+  }
+  if (method === "PUT" && parts[0] === "messaging" && parts[1] === "templates" && parts[2]) {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => saveTemplate(ctx, parts[2], body.body == null ? null : String(body.body))));
+  }
+  if (key === "POST me/telegram-link") return NextResponse.json(await run((ctx) => telegramLink(ctx, { self: true })));
+  if (key === "DELETE me/telegram-link") return NextResponse.json(await run((ctx) => unlinkSelfTelegram(ctx)));
+  if (parts[0] === "clients" && parts[1] && parts[2] === "messages") {
+    if (method === "GET") return NextResponse.json(await run((ctx) => clientMessages(ctx, parts[1])));
+    if (method === "POST") {
+      const body = await readJson(request);
+      return NextResponse.json(
+        await run((ctx) =>
+          sendManual(ctx, parts[1], {
+            body: String(body.body ?? ""),
+            appointmentId: body.appointmentId ? String(body.appointmentId) : null,
+            branchId: body.branchId ? String(body.branchId) : null,
+          }),
+        ),
+      );
+    }
+  }
+  if (parts[0] === "clients" && parts[1] && parts[2] === "telegram-link" && method === "POST") {
+    return NextResponse.json(await run((ctx) => telegramLink(ctx, { clientId: parts[1] })));
+  }
+  if (parts[0] === "clients" && parts[1] && parts[2] === "consents" && method === "PATCH") {
+    const body = await readJson(request);
+    return NextResponse.json(
+      await run((ctx) =>
+        updateConsents(ctx, parts[1], {
+          pd: typeof body.pd === "boolean" ? body.pd : undefined,
+          marketing: typeof body.marketing === "boolean" ? body.marketing : undefined,
+        }),
+      ),
+    );
+  }
   if (key === "GET clients") return NextResponse.json(await run((ctx) => listClients(ctx, url.searchParams.get("q") ?? "")));
   if (key === "POST clients") {
     const body = await readJson(request);
@@ -716,6 +789,7 @@ async function handle(request: NextRequest, parts: string[]) {
             amountMinor: body.amountMinor === undefined ? undefined : Number(body.amountMinor),
             purpose: body.purpose === "deposit" || body.purpose === "visit" ? body.purpose : undefined,
             origin: originOf(request),
+            send: body.send === true,
           }),
         ),
       );
@@ -746,6 +820,9 @@ async function handlePublic(request: NextRequest, parts: string[]) {
   if (parts[0] === "booking" && parts[1]) {
     const { tenantId, appointmentId } = await resolveBookingToken(parts[1]);
     if (method === "GET" && !parts[2]) return NextResponse.json(await asOnline(tenantId, (ctx) => getBooking(ctx, appointmentId)));
+    if (method === "POST" && parts[2] === "confirm") {
+      return NextResponse.json(await asOnline(tenantId, (ctx) => confirmVisit(ctx, appointmentId, "link")));
+    }
     if (method === "POST" && parts[2] === "cancel") {
       const body = await readJson(request);
       return NextResponse.json(
@@ -767,6 +844,7 @@ async function handlePublic(request: NextRequest, parts: string[]) {
   if (parts[0] === "b" && parts[1] && parts[2]) {
     const { tenantId, branchId } = await resolvePublicBranch(parts[1], parts[2]);
     const action = parts.slice(3).join("/");
+    if (method === "GET" && action === "privacy") return NextResponse.json(await asOnline(tenantId, (ctx) => privacyInfo(ctx, branchId)));
     if (method === "GET" && action === "catalog") return NextResponse.json(await asOnline(tenantId, (ctx) => publicCatalog(ctx, branchId)));
     if (method === "GET" && action === "slots") {
       return NextResponse.json(
@@ -807,6 +885,8 @@ async function handlePublic(request: NextRequest, parts: string[]) {
             comment: body.comment ? String(body.comment) : undefined,
             idempotencyKey: body.idempotencyKey ? String(body.idempotencyKey) : undefined,
             promoCode: body.promoCode ? String(body.promoCode) : undefined,
+            consent: body.consent === true,
+            marketing: body.marketing === true,
           }),
         ),
       );

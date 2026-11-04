@@ -79,6 +79,17 @@ export async function telegramSend(chatId: string, body: string, buttons?: Butto
   }
 }
 
+/** Stops the spinner on an inline button. */
+export async function telegramAnswer(callbackQueryId: string, text?: string) {
+  const api = telegram();
+  if (!api) return;
+  try {
+    await api("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
+  } catch {
+    // the follow-up message still reaches the chat
+  }
+}
+
 registerChannel({ name: "telegram", address: "telegram", deliver: (message) => telegramSend(message.recipient, message.body, message.buttons) });
 
 // ---------------------------------------------------------------- SMS
@@ -319,7 +330,20 @@ export async function clientMessages(ctx: Ctx, clientId: string) {
     [clientId],
   );
   const link = await one<{ username: string | null; linked_at: Date }>(ctx.db, "SELECT username, linked_at FROM telegram_links WHERE client_id = $1", [clientId]);
+  const consent = await one<{ consent_pd_at: Date | null; consent_pd_source: string | null; consent_marketing: boolean; consent_marketing_at: Date | null }>(
+    ctx.db,
+    "SELECT consent_pd_at, consent_pd_source, consent_marketing, consent_marketing_at FROM clients WHERE id = $1",
+    [clientId],
+  );
+  if (!consent) throw new AppError("NOT_FOUND", "Клиент не найден");
   return {
+    telegramConfigured: telegramConfigured(),
+    consents: {
+      pdAt: consent.consent_pd_at ? new Date(consent.consent_pd_at).toISOString() : null,
+      pdSource: consent.consent_pd_source,
+      marketing: consent.consent_marketing,
+      marketingAt: consent.consent_marketing_at ? new Date(consent.consent_marketing_at).toISOString() : null,
+    },
     telegram: link ? { username: link.username, linkedAt: new Date(link.linked_at).toISOString() } : null,
     messages: rows.map((row) => ({ id: row.id, kind: row.kind, channel: row.channel, body: row.body, status: row.status, error: row.error, createdAt: new Date(row.created_at).toISOString() })),
   };
@@ -443,4 +467,93 @@ export async function markNotificationsRead(ctx: Ctx, ids?: string[]) {
     );
   }
   return listNotifications(ctx);
+}
+
+
+// ---------------------------------------------------------------- Consents (152-ФЗ / 38-ФЗ)
+
+/** MSG-CONSENT-01: the desk records a consent given on paper or in person; withdrawals are kept in the audit. */
+export async function updateConsents(ctx: Ctx, clientId: string, input: { pd?: boolean; marketing?: boolean }) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  const row = await one<{ id: string }>(ctx.db, "SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", [clientId]);
+  if (!row) throw new AppError("NOT_FOUND", "Клиент не найден");
+  const now = ctx.now.toISOString();
+  if (input.pd === true) {
+    await ctx.db.query("UPDATE clients SET consent_pd_at = COALESCE(consent_pd_at, $2), consent_pd_source = COALESCE(consent_pd_source, 'desk') WHERE id = $1", [clientId, now]);
+  } else if (input.pd === false) {
+    // Withdrawn: marketing goes with it, and the salon no longer writes first.
+    await ctx.db.query("UPDATE clients SET consent_pd_at = NULL, consent_pd_source = NULL, consent_marketing = false, consent_marketing_at = NULL WHERE id = $1", [clientId]);
+  }
+  if (input.marketing !== undefined && input.pd !== false) {
+    await ctx.db.query(
+      "UPDATE clients SET consent_marketing = $2, consent_marketing_at = CASE WHEN $2 THEN COALESCE(consent_marketing_at, $3::timestamptz) ELSE NULL END WHERE id = $1",
+      [clientId, input.marketing, now],
+    );
+  }
+  await audit(ctx, { branchId: ctx.actor.branchId ?? null, entity: "client", entityId: clientId, action: "client.consents", diff: input });
+  return (await clientMessages(ctx, clientId)).consents;
+}
+
+// ---------------------------------------------------------------- Tenant settings
+
+export async function messagingSettings(ctx: Ctx) {
+  if (!isAdminPlus(ctx.actor)) throw new AppError("FORBIDDEN", "Недостаточно прав");
+  const tenant = await one<{ message_channels: string[]; legal_name: string; legal_inn: string; privacy_email: string; name: string }>(
+    ctx.db,
+    "SELECT message_channels, legal_name, legal_inn, privacy_email, name FROM tenants WHERE id = $1",
+    [ctx.actor.tenantId],
+  );
+  const self = await one<{ username: string | null }>(ctx.db, "SELECT username FROM telegram_links WHERE user_id = $1", [ctx.actor.userId]);
+  return {
+    channels: channelCatalog(),
+    order: tenant?.message_channels?.length ? tenant.message_channels : ["log"],
+    legalName: tenant?.legal_name ?? "",
+    legalInn: tenant?.legal_inn ?? "",
+    privacyEmail: tenant?.privacy_email ?? "",
+    templates: await listTemplates(ctx),
+    placeholders: PLACEHOLDERS,
+    telegram: { configured: telegramConfigured(), bot: telegramBotName() || null, selfLinked: Boolean(self), selfUsername: self?.username ?? null },
+  };
+}
+
+export async function updateMessagingSettings(ctx: Ctx, input: { order?: unknown; legalName?: unknown; legalInn?: unknown; privacyEmail?: unknown }) {
+  if (ctx.actor.role !== "owner" && ctx.actor.role !== "super") throw new AppError("FORBIDDEN", "Каналы и реквизиты меняет владелец");
+  if (input.order !== undefined) {
+    const order = Array.isArray(input.order) ? input.order.map(String) : [];
+    const known = new Set(channelCatalog().map((row) => row.name));
+    const clean = [...new Set(order.filter((name) => known.has(name)))];
+    if (!clean.length) throw new AppError("VALIDATION", "Выберите хотя бы один канал");
+    await ctx.db.query("UPDATE tenants SET message_channels = $2 WHERE id = $1", [ctx.actor.tenantId, clean]);
+  }
+  const text = (value: unknown, max: number) => String(value ?? "").trim().slice(0, max);
+  if (input.legalInn !== undefined) {
+    const inn = text(input.legalInn, 12);
+    if (inn && !/^(\d{10}|\d{12})$/.test(inn)) throw new AppError("VALIDATION", "ИНН: 10 или 12 цифр");
+    await ctx.db.query("UPDATE tenants SET legal_inn = $2 WHERE id = $1", [ctx.actor.tenantId, inn]);
+  }
+  if (input.legalName !== undefined) await ctx.db.query("UPDATE tenants SET legal_name = $2 WHERE id = $1", [ctx.actor.tenantId, text(input.legalName, 200)]);
+  if (input.privacyEmail !== undefined) {
+    const email = text(input.privacyEmail, 200).toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AppError("VALIDATION", "Некорректный email");
+    await ctx.db.query("UPDATE tenants SET privacy_email = $2 WHERE id = $1", [ctx.actor.tenantId, email]);
+  }
+  await audit(ctx, { branchId: null, entity: "tenant", entityId: ctx.actor.tenantId, action: "messaging.settings", diff: input as Record<string, unknown> });
+  return messagingSettings(ctx);
+}
+
+export async function unlinkSelfTelegram(ctx: Ctx) {
+  await ctx.db.query("DELETE FROM telegram_links WHERE user_id = $1", [ctx.actor.userId]);
+  return messagingSettings(ctx);
+}
+
+/** Operator details for the public privacy page of the online booking. */
+export async function privacyInfo(ctx: Ctx, branchId: string) {
+  const row = await one<{ name: string; legal_name: string; legal_inn: string; privacy_email: string; branch: string; address: string }>(
+    ctx.db,
+    `SELECT t.name, t.legal_name, t.legal_inn, t.privacy_email, b.name AS branch, b.address
+     FROM tenants t JOIN branches b ON b.tenant_id = t.id WHERE b.id = $1`,
+    [branchId],
+  );
+  if (!row) throw new AppError("NOT_FOUND", "Не найдено");
+  return { salon: row.name, operator: row.legal_name || row.name, inn: row.legal_inn, email: row.privacy_email, branch: row.branch, address: row.address };
 }

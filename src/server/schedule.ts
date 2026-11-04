@@ -5,6 +5,7 @@ import { audit } from "./audit";
 import { addException, getWeekTemplate, saveWeekTemplate } from "./catalog";
 import { many, one } from "./db";
 import type { Ctx } from "./types";
+import { notifyDesk } from "./messaging";
 
 // SCH-*: exceptions list, removal, and the master's change requests (03-services-staff §3–4).
 
@@ -185,6 +186,15 @@ export async function createScheduleRequest(
     [id, ctx.actor.tenantId, input.branchId, staffId, input.kind, JSON.stringify(payload), comment, ctx.actor.userId],
   );
   await audit(ctx, { branchId: input.branchId, entity: "staff", entityId: staffId, action: "schedule.request_created", diff: { kind: input.kind, comment } });
+  const staff = await one<{ display_name: string }>(ctx.db, "SELECT display_name FROM staff WHERE id = $1", [staffId]);
+  await notifyDesk(ctx, {
+    branchId: input.branchId,
+    kind: "schedule.request",
+    title: `Запрос по графику: ${staff?.display_name ?? "мастер"}`,
+    body: comment || "Откройте «График» и примите решение.",
+    entity: "schedule_request",
+    entityId: id,
+  });
   return requestById(ctx, id);
 }
 

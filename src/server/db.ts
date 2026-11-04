@@ -36,6 +36,11 @@ export async function poolOne<T extends QueryResultRow>(
   return result.rows[0] ?? null;
 }
 
+export async function poolMany<T extends QueryResultRow>(text: string, params: unknown[] = []): Promise<T[]> {
+  const result = await pool.query<T>(text, params);
+  return result.rows;
+}
+
 export async function withSession<T>(
   settings: { tenantId?: string; userId?: string },
   fn: (db: PoolClient) => Promise<T>,

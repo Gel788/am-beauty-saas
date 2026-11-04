@@ -520,11 +520,12 @@ async function loadBooking(ctx: Ctx, appointmentId: string) {
     status: string;
     staff_name: string;
     client_name: string | null;
+    client_id: string | null;
     title: string | null;
     price_minor: number;
   }>(
     ctx.db,
-    `SELECT a.id, a.branch_id, a.staff_id, a.starts_at, a.ends_at, a.status, s.display_name AS staff_name,
+    `SELECT a.id, a.branch_id, a.staff_id, a.client_id, a.starts_at, a.ends_at, a.status, s.display_name AS staff_name,
             c.name AS client_name,
             (SELECT string_agg(title_snapshot, ', ' ORDER BY position) FROM appointment_services WHERE appointment_id = a.id) AS title,
             (SELECT COALESCE(SUM(price_minor), 0)::int FROM appointment_services WHERE appointment_id = a.id) AS price_minor
@@ -539,7 +540,8 @@ async function loadBooking(ctx: Ctx, appointmentId: string) {
   if (!branch) throw new AppError("NOT_FOUND", "Запись не найдена");
   const cancelUntil = new Date(new Date(row.starts_at).getTime() - Number(branch.online_cancel_hours) * 3600000);
   const canCancel = CLIENT_CANCELLABLE.has(row.status) && ctx.now.getTime() < cancelUntil.getTime();
-  return { row, branch, cancelUntil, canCancel };
+  const canConfirm = row.status === "scheduled" && new Date(row.starts_at).getTime() > ctx.now.getTime() - 3_600_000;
+  return { row, branch, cancelUntil, canCancel, canConfirm };
 }
 
 function presentBooking(booking: Awaited<ReturnType<typeof loadBooking>>) {
@@ -555,7 +557,7 @@ function presentBooking(booking: Awaited<ReturnType<typeof loadBooking>>) {
     priceMinor: Number(row.price_minor),
     cancelUntil: booking.cancelUntil.toISOString(),
     canCancel: booking.canCancel,
-    canConfirm: row.status === "scheduled" && new Date(row.starts_at).getTime() > Date.now() - 3_600_000,
+    canConfirm: booking.canConfirm,
     branch: presentBranch(branch),
   };
 }
@@ -565,7 +567,7 @@ export async function getBooking(ctx: Ctx, appointmentId: string) {
 }
 
 /** OB-CANCEL-01: inside the window the client cancels; later it becomes a request to the admin. */
-export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { reason?: string } = {}) {
+export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { reason?: string; notifyClient?: boolean } = {}) {
   const booking = await loadBooking(ctx, appointmentId);
   const reason = (input.reason ?? "").trim().slice(0, 300);
   if (booking.row.status === "cancelled") return { ...presentBooking(booking), outcome: "already_cancelled" as const };
@@ -611,6 +613,17 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
     entity: "appointment",
     entityId: appointmentId,
   });
+  // Telegram already answers in the chat; elsewhere the client gets the cancellation in writing.
+  if (booking.row.client_id && booking.branch.booking_message_enabled && input.notifyClient !== false) {
+    const { values } = await appointmentValues(ctx, appointmentId);
+    await deliverToClient(ctx, {
+      clientId: booking.row.client_id,
+      branchId: booking.row.branch_id,
+      appointmentId,
+      kind: "booking_cancelled",
+      body: render(await templateBody(ctx, "booking_cancelled"), values),
+    });
+  }
   return { ...presentBooking(await loadBooking(ctx, appointmentId)), outcome: "cancelled" as const };
 }
 
@@ -618,7 +631,7 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
 export async function confirmVisit(ctx: Ctx, appointmentId: string, via: "link" | "telegram") {
   const booking = await loadBooking(ctx, appointmentId);
   if (booking.row.status === "confirmed") return { ...presentBooking(booking), outcome: "already_confirmed" as const };
-  if (booking.row.status !== "scheduled") throw new AppError("VALIDATION", "Эту запись уже нельзя подтвердить");
+  if (!booking.canConfirm) throw new AppError("VALIDATION", "Эту запись уже нельзя подтвердить");
   await ctx.db.query(
     "UPDATE appointments SET status = 'confirmed', confirmed_via = $2, version = version + 1, updated_by = $3, updated_at = now() WHERE id = $1",
     [appointmentId, via, ctx.actor.userId],

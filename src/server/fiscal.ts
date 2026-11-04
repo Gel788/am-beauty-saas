@@ -8,6 +8,8 @@ import { AppError } from "@/domain/errors";
 import { isAdminPlus, loadBranch } from "./access";
 import { many, one, pool, withSession } from "./db";
 import type { Actor, BranchRow, Ctx } from "./types";
+import { formatMoney } from "@/domain/money";
+import { notifyDesk } from "./messaging";
 
 export const FISCAL_ACTOR_ID = "00000000-0000-0000-0000-0000000000c1";
 const MAX_ATTEMPTS = 10;
@@ -257,6 +259,7 @@ export async function afterPaymentVoidedFiscal(ctx: Ctx, paymentId: string) {
 type ReceiptRow = {
   id: string;
   payment_id: string;
+  branch_id: string;
   kind: string;
   status: string;
   provider: string;
@@ -328,6 +331,14 @@ export async function processReceipts(ctx: Ctx, limit = 20) {
         attempts,
       ]);
       stats.failed += 1;
+      await notifyDesk(ctx, {
+        branchId: receipt.branch_id,
+        kind: "fiscal.failed",
+        title: `Чек не пробит: ${formatMoney(Number(receipt.total_minor))}`,
+        body: result.error ?? "Провайдер не принял чек. Откройте «Касса → Чеки» и повторите.",
+        entity: "payment",
+        entityId: receipt.payment_id,
+      });
     }
   }
   return stats;

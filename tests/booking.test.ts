@@ -56,7 +56,7 @@ async function book(date: string, time: string, staffId: string | null = salon.s
   const hold = await online((ctx) =>
     createHold(ctx, salon.branchId, { serviceId: salon.serviceId, staffId, startsAt: at(time, date) }),
   );
-  const booking = await online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Онлайн Клиент", phone }));
+  const booking = await online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Онлайн Клиент", phone, consent: true }));
   return { hold, booking };
 }
 
@@ -155,7 +155,7 @@ describe("online booking", () => {
     );
     const later = minutesLater(11);
     await expect(
-      online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Ира", phone: freshPhone() }), later),
+      online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Ира", phone: freshPhone(), consent: true }), later),
     ).rejects.toMatchObject({ code: "CONFLICT_SLOT", details: { reason: "HOLD_EXPIRED" } });
     const result = await online(
       (ctx) => listSlots(ctx, salon.branchId, { serviceId: salon.serviceId, staffId: salon.staffA, from: "2026-11-08", days: 1 }),
@@ -190,7 +190,7 @@ describe("online booking", () => {
       createHold(ctx, salon.branchId, { serviceId: salon.serviceId, staffId: salon.staffB, startsAt: at("10:00", "2026-11-10") }),
     );
     const phone = freshPhone();
-    const input = { holdId: hold.holdId, name: "Лена", phone, idempotencyKey: "k-1" };
+    const input = { holdId: hold.holdId, name: "Лена", phone, idempotencyKey: "k-1", consent: true };
     const a = await online((ctx) => confirmBooking(ctx, salon.branchId, input));
     const b = await online((ctx) => confirmBooking(ctx, salon.branchId, input));
     expect(b).toEqual(a);
@@ -206,7 +206,7 @@ describe("online booking", () => {
     await run(salon.owner, (ctx) => ctx.db.query("UPDATE staff SET online_bookable = false WHERE id = $1", [salon.staffB]));
     try {
       await expect(
-        online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Оля", phone: freshPhone() })),
+        online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Оля", phone: freshPhone(), consent: true })),
       ).rejects.toMatchObject({ code: "CONFLICT_SLOT", details: { reason: "STAFF_UNAVAILABLE" } });
     } finally {
       await run(salon.owner, (ctx) => ctx.db.query("UPDATE staff SET online_bookable = true WHERE id = $1", [salon.staffB]));
@@ -227,7 +227,7 @@ describe("online booking", () => {
       }),
     );
     await expect(
-      online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Оля", phone: freshPhone() })),
+      online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "Оля", phone: freshPhone(), consent: true })),
     ).rejects.toMatchObject({ code: "CONFLICT_SLOT", details: { reason: "SLOT_TAKEN" } });
   });
 

@@ -10,6 +10,8 @@ import { isAdminPlus, loadBranch } from "./access";
 import { many, one, poolOne, withSession } from "./db";
 import { createPayment, LIVE_PAYMENT, NET_AMOUNT } from "./payments";
 import type { Actor, Ctx } from "./types";
+import { formatMoney } from "@/domain/money";
+import { appointmentValues, deliverToClient, notifyDesk, render, templateBody, type SendResult } from "./messaging";
 
 export const ACQUIRING_ACTOR_ID = "00000000-0000-0000-0000-0000000000c2";
 
@@ -108,7 +110,7 @@ async function appointmentDue(ctx: Ctx, appointmentId: string) {
 export async function createPayLink(
   ctx: Ctx,
   appointmentId: string,
-  input: { amountMinor?: number; purpose?: "deposit" | "visit"; origin: string },
+  input: { amountMinor?: number; purpose?: "deposit" | "visit"; origin: string; send?: boolean },
 ) {
   if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") throw new AppError("FORBIDDEN", "Недостаточно прав");
   const appt = await one<{ id: string; branch_id: string; client_id: string | null; status: string; starts_at: Date }>(
@@ -156,7 +158,20 @@ export async function createPayLink(
   );
   await audit(ctx, { branchId: appt.branch_id, entity: "appointment", entityId: appointmentId, action: "paylink.created", diff: { onlinePaymentId: id, amountMinor: amount, purpose } });
   const row = await one<OnlineRow>(ctx.db, "SELECT * FROM online_payments WHERE id = $1", [id]);
-  return present(row!, payPageUrl);
+  // MSG-PAY-01: the link goes to the client through the salon's channels; it is only shown once.
+  let sent: SendResult | null = null;
+  if (input.send && appt.client_id) {
+    const { values } = await appointmentValues(ctx, appointmentId, { сумма: formatMoney(amount, branch.currency), ссылка: payPageUrl });
+    sent = await deliverToClient(ctx, {
+      clientId: appt.client_id,
+      branchId: appt.branch_id,
+      appointmentId,
+      kind: "pay_link",
+      body: render(await templateBody(ctx, "pay_link"), values),
+      buttons: [{ text: "Оплатить", url: payPageUrl }],
+    });
+  }
+  return { ...present(row!, payPageUrl), sent };
 }
 
 export async function listPayLinks(ctx: Ctx, appointmentId: string) {
@@ -246,6 +261,15 @@ export async function applyProviderStatus(ctx: Ctx, id: string, status: Provider
     entityId: paymentId,
     action: "paylink.paid",
     diff: { onlinePaymentId: id, amountMinor: amount, method },
+  });
+  const client = row.client_id ? await one<{ name: string }>(ctx.db, "SELECT name FROM clients WHERE id = $1", [row.client_id]) : null;
+  await notifyDesk(actorCtx, {
+    branchId: row.branch_id,
+    kind: error ? "payment.online_problem" : "payment.online",
+    title: `Оплата онлайн ${formatMoney(amount)}: ${client?.name ?? "клиент"}`,
+    body: error ?? `${method === "sbp" ? "СБП" : "Карта"} · ${row.description}`,
+    entity: "appointment",
+    entityId: row.appointment_id,
   });
   return present({ ...row, status: "succeeded", method, payment_id: paymentId, paid_at: ctx.now, error });
 }
