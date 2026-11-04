@@ -9,7 +9,7 @@ import { api, type ApiError } from "./api";
 import { PaymentRow, type PaymentItem } from "./payment-actions";
 import { PayLinkBlock } from "./pay-link";
 import { CustomInputs, type Field } from "./resources-fields-settings";
-import { Modal, useToast } from "./ui";
+import { Modal, useToast, Overlay } from "./ui";
 
 type Line = { serviceId: string; title: string; durationMin: number; priceMinor: number };
 type CatalogService = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[] };
@@ -423,6 +423,7 @@ export function RecordDrawer({
   }
 
   return (
+    <Overlay>
     <div className="drawer-backdrop" onMouseDown={askClose}>
       <aside className="drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="Запись">
         <div className="spread">
@@ -705,5 +706,6 @@ export function RecordDrawer({
         )}
       </aside>
     </div>
+    </Overlay>
   );
 }
