@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatMoney } from "@/domain/money";
 import { formatPhone } from "@/domain/phone";
 import { STATUS_LABEL, type AppointmentStatus } from "@/domain/status";
@@ -29,6 +29,7 @@ type Client = {
 
 export function ClientsView() {
   const toast = useToast();
+  const cardRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
   const [selected, setSelected] = useState<Client | null>(null);
@@ -79,10 +80,15 @@ export function ClientsView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // MOBILE-01: on a phone the card sits under the list, so bring it into view.
+  function reveal() {
+    if (window.matchMedia("(max-width: 980px)").matches) window.setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   async function open(client: Client) {
     const full = await api<Client>(`/api/clients/${client.id}`);
     setSelected(full);
+    reveal();
     setForm({ name: full.name, phone: full.phones[0]?.phone ?? "", email: full.email ?? "", notes: full.notes });
     setCustom(full.custom ?? {});
     setHistory(await api(`/api/clients/${client.id}/history`));
@@ -113,7 +119,7 @@ export function ClientsView() {
           )}
           <Link className="btn" href="/clients/import">Импорт</Link>
           <Link className="btn" href="/clients/duplicates">Дубли</Link>
-          <button className="btn-gradient" onClick={() => { setCreating(true); setSelected(null); setCustom({}); setForm({ name: "", phone: "", email: "", notes: "" }); }}>Новый клиент</button>
+          <button className="btn-gradient" onClick={() => { setCreating(true); setSelected(null); reveal(); setCustom({}); setForm({ name: "", phone: "", email: "", notes: "" }); }}>Новый клиент</button>
         </div>
       </div>
       {error && <div className="banner">{error}</div>}
@@ -132,7 +138,7 @@ export function ClientsView() {
             </button>
           ))}
         </div>
-        <div className="panel">
+        <div className="panel" ref={cardRef}>
           {!selected && !creating && <div className="empty">Выберите клиента, чтобы увидеть историю и долг.</div>}
           {(selected || creating) && (
             <form

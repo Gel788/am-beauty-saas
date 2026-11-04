@@ -75,6 +75,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
     };
   }, [router]);
 
+  // MOBILE-01: on a phone the menu is one sideways strip; keep the current page in sight.
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 720px)").matches) return;
+    const nav = document.querySelector<HTMLElement>(".sidebar .nav");
+    const item = nav?.querySelector<HTMLElement>(".nav-item.active");
+    if (nav && item) nav.scrollLeft = item.offsetLeft - (nav.clientWidth - item.offsetWidth) / 2;
+  }, [pathname, me]);
+
   const branch = me?.branches[0];
   const ownerPhoto = portraitFor(me?.actor.name) ?? "/staff/olga.jpg";
 
