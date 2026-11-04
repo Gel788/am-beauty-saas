@@ -65,7 +65,10 @@ set_env APP_DB_PASSWORD "$(openssl rand -hex 24)"
 set_env JOBS_TOKEN "$(openssl rand -hex 24)"
 set_env INTEGRATIONS_KEY "$(openssl rand -hex 32)"
 set_env TELEGRAM_WEBHOOK_SECRET "$(openssl rand -hex 16)"
-set_env PLATFORM_ADMIN_EMAILS "${ADMIN_EMAIL:-olga@ambeauty.local}"
+# The platform cabinet has its own sign-in, apart from any salon.
+if [ -n "${ADMIN_EMAIL:-}" ]; then sed -i "/^PLATFORM_ADMIN_EMAILS=/d" "$ENV"; echo "PLATFORM_ADMIN_EMAILS=$ADMIN_EMAIL" >> "$ENV"
+elif grep -qE '^PLATFORM_ADMIN_EMAILS=olga@ambeauty.local$' "$ENV"; then sed -i "s|^PLATFORM_ADMIN_EMAILS=.*|PLATFORM_ADMIN_EMAILS=platform@ambeauty.local|" "$ENV"
+else set_env PLATFORM_ADMIN_EMAILS "platform@ambeauty.local"; fi
 chmod 600 "$ENV"
 DOMAIN_NOW="$(grep -E '^DOMAIN=' "$ENV" | cut -d= -f2-)"
 
@@ -102,6 +105,6 @@ for i in $(seq 1 60); do
 done
 say "Done"
 echo "CRM:        https://$DOMAIN_NOW"
-[ "$SEED" = 1 ] && echo "Demo login: olga@ambeauty.local / ambeauty"
+[ "$SEED" = 1 ] && echo "Demo logins: salon olga@ambeauty.local / ambeauty, platform platform@ambeauty.local / ambeauty"
 echo "Platform:   https://$DOMAIN_NOW/platform  (for $(grep -E '^PLATFORM_ADMIN_EMAILS=' "$ENV" | cut -d= -f2-))"
 echo "Health:     $(curl -fsSk "https://$DOMAIN_NOW/api/health" 2>/dev/null || echo 'certificate is still being issued, try again in a minute')"
