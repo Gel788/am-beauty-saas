@@ -5,7 +5,9 @@ import { formatMoney, rublesToMinor } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { Modal, useToast } from "./ui";
 
-type Settings = { bonusEnabled: boolean; bonusEarnBps: number; bonusBurnMaxBps: number; bonusEarnOnProducts: boolean; certificateValidDays: number };
+type Tier = { title: string; minSpendMinor: number; earnBps: number };
+type Settings = { bonusEnabled: boolean; bonusEarnBps: number; bonusBurnMaxBps: number; bonusEarnOnProducts: boolean; certificateValidDays: number; bonusExpireDays: number; tiers: Tier[] };
+type TierDraft = { title: string; spend: string; earn: string };
 type Certificate = {
   id: string;
   code: string;
@@ -481,7 +483,7 @@ function PromoModal({ services, onClose, onDone }: { services: Service[]; onClos
 function BonusProgram() {
   const { data, reload } = useLoad<Settings>("/api/loyalty/settings");
   const { busy, call } = useAction();
-  const [form, setForm] = useState<{ enabled: boolean; earn: string; burn: string; products: boolean; certDays: string } | null>(null);
+  const [form, setForm] = useState<{ enabled: boolean; earn: string; burn: string; products: boolean; certDays: string; expireDays: string; tiers: TierDraft[] } | null>(null);
   useEffect(() => {
     if (data)
       setForm({
@@ -490,6 +492,8 @@ function BonusProgram() {
         burn: String(data.bonusBurnMaxBps / 100),
         products: data.bonusEarnOnProducts,
         certDays: String(data.certificateValidDays),
+        expireDays: String(data.bonusExpireDays ?? 0),
+        tiers: (data.tiers ?? []).map((tier) => ({ title: tier.title, spend: String(tier.minSpendMinor / 100), earn: String(tier.earnBps / 100) })),
       });
   }, [data]);
   if (!form) return <div className="skeleton" />;
@@ -505,6 +509,26 @@ function BonusProgram() {
         <div className="field" style={{ flex: 1 }}><label>Списание, не больше % чека</label><input inputMode="decimal" value={form.burn} onChange={(event) => setForm({ ...form, burn: event.target.value })} /></div>
       </div>
       <label className="row"><input type="checkbox" checked={form.products} onChange={(event) => setForm({ ...form, products: event.target.checked })} /> начислять и на покупку товаров</label>
+      <div className="field">
+        <label>Баллы сгорают через, дней (0 — бессрочно)</label>
+        <input inputMode="numeric" value={form.expireDays} onChange={(event) => setForm({ ...form, expireDays: event.target.value })} />
+        <span className="muted" style={{ fontSize: 12.5 }}>Сгорают сначала самые старые баллы. В карточке клиента видно, сколько сгорит в ближайшие 2 недели.</span>
+      </div>
+      <div className="list">
+        <b>Уровни клиентов</b>
+        <span className="muted" style={{ fontSize: 12.5 }}>Уровень даётся по сумме всех оплат клиента и заменяет базовый процент начисления. Без уровней действует базовый процент.</span>
+        {form.tiers.map((tier, index) => (
+          <div key={index} className="row tier-row">
+            <input placeholder="Название, напр. Золото" value={tier.title} onChange={(event) => setForm({ ...form, tiers: form.tiers.map((item, i) => (i === index ? { ...item, title: event.target.value } : item)) })} />
+            <label className="muted">от<input inputMode="decimal" value={tier.spend} onChange={(event) => setForm({ ...form, tiers: form.tiers.map((item, i) => (i === index ? { ...item, spend: event.target.value } : item)) })} />₽</label>
+            <label className="muted"><input inputMode="decimal" value={tier.earn} onChange={(event) => setForm({ ...form, tiers: form.tiers.map((item, i) => (i === index ? { ...item, earn: event.target.value } : item)) })} />%</label>
+            <button className="icon-btn" type="button" aria-label="Убрать уровень" onClick={() => setForm({ ...form, tiers: form.tiers.filter((_, i) => i !== index) })}>×</button>
+          </div>
+        ))}
+        {form.tiers.length < 6 && (
+          <button className="btn-ghost" type="button" style={{ alignSelf: "flex-start" }} onClick={() => setForm({ ...form, tiers: [...form.tiers, { title: "", spend: form.tiers.length ? String(Number(form.tiers[form.tiers.length - 1].spend || 0) + 30000) : "0", earn: form.earn }] })}>+ Уровень</button>
+        )}
+      </div>
       <div className="field"><label>Срок действия подарочного сертификата, дней</label><input inputMode="numeric" value={form.certDays} onChange={(event) => setForm({ ...form, certDays: event.target.value })} /></div>
       <div className="panel" style={{ background: "rgba(255,255,255,0.5)" }}>
         <b>Пример.</b> Визит на {formatMoney(400000)}: клиент получит {Math.floor((400000 * earn) / 10000 / 100)} баллов, а оплатить баллами сможет до {formatMoney(Math.floor((400000 * burn) / 10000))}.
@@ -517,7 +541,15 @@ function BonusProgram() {
           (await call(
             "/api/loyalty/settings",
             "PATCH",
-            { bonusEnabled: form.enabled, bonusEarnBps: earn, bonusBurnMaxBps: burn, bonusEarnOnProducts: form.products, certificateValidDays: Number(form.certDays) },
+            {
+              bonusEnabled: form.enabled,
+              bonusEarnBps: earn,
+              bonusBurnMaxBps: burn,
+              bonusEarnOnProducts: form.products,
+              certificateValidDays: Number(form.certDays),
+              bonusExpireDays: Number(form.expireDays) || 0,
+              tiers: form.tiers.map((tier) => ({ title: tier.title, minSpendMinor: Math.round((Number(tier.spend.replace(",", ".")) || 0) * 100), earnBps: toBps(tier.earn) })),
+            },
             "Настройки сохранены",
           )) && reload()
         }

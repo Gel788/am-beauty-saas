@@ -961,10 +961,11 @@ export async function getJournal(
     force_overlap: boolean;
     debt_minor: number;
     custom: Record<string, unknown> | null;
+    deposit_due_at: Date | null;
   }>(
     ctx.db,
     `SELECT a.id, a.staff_id, a.client_id, c.name AS client_name, a.booked_by_client_id, a.starts_at, a.ends_at,
-            a.status, a.comment, a.source, a.color, a.version, a.force_overlap, a.debt_minor, a.custom
+            a.status, a.comment, a.source, a.color, a.version, a.force_overlap, a.debt_minor, a.custom, a.deposit_due_at
      FROM appointments a
      LEFT JOIN clients c ON c.id = a.client_id
      WHERE a.branch_id = $1 AND a.starts_at < $3 AND a.ends_at > $2
@@ -1043,6 +1044,7 @@ export async function getJournal(
       paidMinor: paid,
       resourceIds: holds.filter((hold) => hold.appointment_id === row.id).map((hold) => hold.resource_id),
       custom: row.custom ?? {},
+      depositDueAt: row.deposit_due_at ? new Date(row.deposit_due_at).toISOString() : null,
       note: journalField && row.custom?.[journalField.key] !== undefined ? renderValue(journalField, row.custom[journalField.key]) : null,
     });
   }

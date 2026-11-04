@@ -33,6 +33,7 @@ type Appt = {
   resourceIds?: string[];
   /** CF-JOURNAL-01: the one custom field shown on the block. */
   note?: string | null;
+  depositDueAt?: string | null;
 };
 
 type ResourceColumn = { id: string; title: string; kind: string; color: string; capacity: number };
@@ -490,6 +491,7 @@ export function JournalBoard() {
                           </>
                         )}
                         {appt.source === "online" && <span className="ai-badge" title="Онлайн-запись">Онлайн</span>}
+                        {appt.depositDueAt && <span className="deposit-badge" title={`Отменится, если не оплатят до ${new Date(appt.depositDueAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: timezone })}`}>Ждёт предоплату</span>}
                         <span data-resize="1" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 8, cursor: "ns-resize" }} onPointerDown={(event) => onBlockPointerDown(event, appt, "resize")} />
                       </button>
                     );

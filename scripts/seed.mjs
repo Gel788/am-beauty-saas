@@ -287,6 +287,16 @@ for (const [title, description, host, offset, hours, minutes, duration, capacity
   }
 }
 
+// Stage: bonus tiers and lifetime, SPA asks for a deposit online, hosts are paid per attendee.
+await client.query(
+  `UPDATE tenants SET bonus_enabled = true, bonus_expire_days = 180,
+     loyalty_tiers = '[{"title":"Серебро","minSpendMinor":0,"earnBps":300},{"title":"Золото","minSpendMinor":3000000,"earnBps":500},{"title":"Платина","minSpendMinor":8000000,"earnBps":700}]'::jsonb
+   WHERE id = $1`,
+  [tenant],
+);
+await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id = $1", [serviceIds.spa]);
+await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);

@@ -6,6 +6,8 @@ import { many, pool, withSession } from "./db";
 import { createHash, randomBytes } from "node:crypto";
 import { appointmentValues, deliverToClient, publicUrl, render, templateBody } from "./messaging";
 import { sendGroupReminders } from "./groups";
+import { cancelUnpaidDeposits } from "./deposit";
+import { expireBonuses } from "./loyalty";
 import type { Actor, BranchRow, Ctx } from "./types";
 
 /** The reminder job acts under this fixed id, like the online channel. */
@@ -105,13 +107,20 @@ export async function sendDueReminders(ctx: Ctx) {
   return result;
 }
 
+/** Everything the minute job does for one tenant: unpaid deposits, expiring points, then reminders. */
+export async function runTenantJobs(ctx: Ctx) {
+  await cancelUnpaidDeposits(ctx);
+  await expireBonuses(ctx);
+  return sendDueReminders(ctx);
+}
+
 /** Entry point for cron: walks every tenant that has reminders on, each in its own transaction. */
 export async function runReminderJob(now = new Date()) {
   const tenants = await pool.query<{ tenant_id: string }>("SELECT tenant_id FROM reminder_tenants()");
   const total = { tenants: 0, sent: 0, failed: 0, deferred: 0 };
   for (const { tenant_id: tenantId } of tenants.rows) {
     const result = await withSession({ tenantId, userId: JOBS_ACTOR_ID }, (db) =>
-      sendDueReminders({ db, actor: jobsActor(tenantId), now }),
+      runTenantJobs({ db, actor: jobsActor(tenantId), now }),
     );
     total.tenants += 1;
     total.sent += result.sent;

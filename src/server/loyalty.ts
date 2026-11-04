@@ -17,7 +17,12 @@ type TenantSettings = {
   bonus_burn_max_bps: number;
   bonus_earn_on_products: boolean;
   certificate_valid_days: number;
+  bonus_expire_days: number;
+  loyalty_tiers: Tier[] | null;
 };
+
+/** LOY-TIER-01: reached by lifetime spend; the tier's rate replaces the base earn rate. */
+export type Tier = { title: string; minSpendMinor: number; earnBps: number };
 
 const SETUP_ROLES = ["owner", "admin", "super"];
 
@@ -32,7 +37,7 @@ function assertDesk(ctx: Ctx) {
 async function settings(ctx: Ctx) {
   const row = await one<TenantSettings>(
     ctx.db,
-    "SELECT bonus_enabled, bonus_earn_bps, bonus_burn_max_bps, bonus_earn_on_products, certificate_valid_days FROM tenants WHERE id = $1",
+    "SELECT bonus_enabled, bonus_earn_bps, bonus_burn_max_bps, bonus_earn_on_products, certificate_valid_days, bonus_expire_days, loyalty_tiers FROM tenants WHERE id = $1",
     [ctx.actor.tenantId],
   );
   if (!row) throw new AppError("NOT_FOUND", "Салон не найден");
@@ -46,7 +51,86 @@ function presentSettings(row: TenantSettings) {
     bonusBurnMaxBps: Number(row.bonus_burn_max_bps),
     bonusEarnOnProducts: row.bonus_earn_on_products,
     certificateValidDays: Number(row.certificate_valid_days),
+    bonusExpireDays: Number(row.bonus_expire_days),
+    tiers: (row.loyalty_tiers ?? []).map((tier) => ({ title: String(tier.title), minSpendMinor: Number(tier.minSpendMinor), earnBps: Number(tier.earnBps) })),
   };
+}
+
+function cleanTiers(input: unknown): Tier[] {
+  if (!Array.isArray(input)) throw new AppError("VALIDATION", "Уровни: список");
+  if (input.length > 6) throw new AppError("VALIDATION", "Не больше 6 уровней");
+  const tiers = input.map((raw) => {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const title = String(item.title ?? "").trim().slice(0, 40);
+    const minSpendMinor = Number(item.minSpendMinor);
+    const earnBps = Number(item.earnBps);
+    if (!title) throw new AppError("VALIDATION", "Уровень: укажите название");
+    if (!Number.isInteger(minSpendMinor) || minSpendMinor < 0) throw new AppError("VALIDATION", `«${title}»: сумма покупок — целое число от 0`);
+    if (!Number.isInteger(earnBps) || earnBps < 0 || earnBps > 10000) throw new AppError("VALIDATION", `«${title}»: начисление от 0 до 100%`);
+    return { title, minSpendMinor, earnBps };
+  });
+  tiers.sort((a, b) => a.minSpendMinor - b.minSpendMinor);
+  for (let i = 1; i < tiers.length; i += 1) {
+    if (tiers[i].minSpendMinor === tiers[i - 1].minSpendMinor) throw new AppError("VALIDATION", "У двух уровней одинаковый порог");
+  }
+  return tiers;
+}
+
+/** What the client paid for services and goods, net of refunds: the tier yardstick. */
+async function clientSpend(ctx: Ctx, clientId: string) {
+  const row = await one<{ s: number }>(
+    ctx.db,
+    `SELECT COALESCE(SUM(CASE WHEN p.direction = 'in' THEN pl.amount_minor ELSE -pl.amount_minor END), 0)::bigint AS s
+     FROM payment_lines pl JOIN payments p ON p.id = pl.payment_id
+     WHERE p.client_id = $1 AND p.status IN ('posted', 'refunded') AND pl.line_type IN ('service', 'deposit', 'product')`,
+    [clientId],
+  );
+  return Math.max(0, Number(row?.s ?? 0));
+}
+
+export function tierFor(tiers: Tier[], spendMinor: number) {
+  let current: Tier | null = null;
+  let next: Tier | null = null;
+  for (const tier of [...tiers].sort((a, b) => a.minSpendMinor - b.minSpendMinor)) {
+    if (tier.minSpendMinor <= spendMinor) current = tier;
+    else if (!next) next = tier;
+  }
+  return { current, next };
+}
+
+/**
+ * LOY-BONUS-EXPIRE-01, FIFO: points credited before the cutoff that were not spent since are due.
+ * due = credits older than N days − everything debited ever (spent, clawed back, expired).
+ */
+async function expiringPoints(ctx: Ctx, clientId: string, cutoff: Date, balance: number) {
+  const row = await one<{ credits: number; debits: number }>(
+    ctx.db,
+    `SELECT COALESCE(SUM(delta) FILTER (WHERE delta > 0 AND created_at < $2), 0)::int AS credits,
+            COALESCE(-SUM(delta) FILTER (WHERE delta < 0), 0)::int AS debits
+     FROM bonus_ledger WHERE client_id = $1`,
+    [clientId, cutoff.toISOString()],
+  );
+  return Math.max(0, Math.min(balance, Number(row?.credits ?? 0) - Number(row?.debits ?? 0)));
+}
+
+/** Job: burns points older than the program's lifetime. Idempotent: expired points count as debits. */
+export async function expireBonuses(ctx: Ctx) {
+  const program = await one<{ bonus_expire_days: number }>(ctx.db, "SELECT bonus_expire_days FROM tenants WHERE id = $1", [ctx.actor.tenantId]);
+  const days = Number(program?.bonus_expire_days ?? 0);
+  if (!days) return 0;
+  const cutoff = new Date(ctx.now.getTime() - days * 86_400_000);
+  const clients = await many<{ id: string; bonus_balance: number }>(
+    ctx.db,
+    `SELECT c.id, c.bonus_balance FROM clients c WHERE c.bonus_balance > 0
+       AND EXISTS (SELECT 1 FROM bonus_ledger l WHERE l.client_id = c.id AND l.delta > 0 AND l.created_at < $1)`,
+    [cutoff.toISOString()],
+  );
+  let total = 0;
+  for (const client of clients) {
+    const due = await expiringPoints(ctx, client.id, cutoff, Number(client.bonus_balance));
+    if (due > 0) total += -(await bonusMove(ctx, client.id, "expire", -due, { reason: `Срок баллов ${days} дн. истёк`, clamp: true }));
+  }
+  return total;
 }
 
 export async function getLoyaltySettings(ctx: Ctx) {
@@ -55,11 +139,15 @@ export async function getLoyaltySettings(ctx: Ctx) {
 
 export async function updateLoyaltySettings(
   ctx: Ctx,
-  input: { bonusEnabled?: boolean; bonusEarnBps?: number; bonusBurnMaxBps?: number; bonusEarnOnProducts?: boolean; certificateValidDays?: number },
+  input: { bonusEnabled?: boolean; bonusEarnBps?: number; bonusBurnMaxBps?: number; bonusEarnOnProducts?: boolean; certificateValidDays?: number; bonusExpireDays?: number; tiers?: unknown },
 ) {
   assertSetup(ctx);
   const current = presentSettings(await settings(ctx));
   const next = { ...current, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as typeof current;
+  if (input.tiers !== undefined) next.tiers = cleanTiers(input.tiers);
+  if (!Number.isInteger(next.bonusExpireDays) || next.bonusExpireDays < 0 || next.bonusExpireDays > 3650) {
+    throw new AppError("VALIDATION", "Срок жизни баллов: от 0 (бессрочно) до 3650 дней");
+  }
   for (const [value, label] of [[next.bonusEarnBps, "Начисление"], [next.bonusBurnMaxBps, "Оплата баллами"]] as const) {
     if (!Number.isInteger(value) || value < 0 || value > 10000) throw new AppError("VALIDATION", `${label}: от 0 до 100%`);
   }
@@ -67,8 +155,9 @@ export async function updateLoyaltySettings(
     throw new AppError("VALIDATION", "Срок сертификата: от 1 до 3650 дней");
   }
   await ctx.db.query(
-    `UPDATE tenants SET bonus_enabled = $2, bonus_earn_bps = $3, bonus_burn_max_bps = $4, bonus_earn_on_products = $5, certificate_valid_days = $6 WHERE id = $1`,
-    [ctx.actor.tenantId, next.bonusEnabled, next.bonusEarnBps, next.bonusBurnMaxBps, next.bonusEarnOnProducts, next.certificateValidDays],
+    `UPDATE tenants SET bonus_enabled = $2, bonus_earn_bps = $3, bonus_burn_max_bps = $4, bonus_earn_on_products = $5, certificate_valid_days = $6,
+       bonus_expire_days = $7, loyalty_tiers = $8::jsonb WHERE id = $1`,
+    [ctx.actor.tenantId, next.bonusEnabled, next.bonusEarnBps, next.bonusBurnMaxBps, next.bonusEarnOnProducts, next.certificateValidDays, next.bonusExpireDays, JSON.stringify(next.tiers)],
   );
   await audit(ctx, { entity: "tenant", entityId: ctx.actor.tenantId, action: "loyalty.settings_updated", diff: input });
   return next;
@@ -84,7 +173,7 @@ async function today(ctx: Ctx, branchId?: string | null) {
 async function bonusMove(
   ctx: Ctx,
   clientId: string,
-  kind: "earn" | "burn" | "clawback" | "burn_refund" | "manual",
+  kind: "earn" | "burn" | "clawback" | "burn_refund" | "manual" | "expire",
   delta: number,
   opts: { paymentId?: string | null; reason?: string | null; clamp?: boolean } = {},
 ) {
@@ -100,9 +189,11 @@ async function bonusMove(
   if (applied === 0) return 0;
   await ctx.db.query("UPDATE clients SET bonus_balance = $2 WHERE id = $1", [clientId, balance + applied]);
   await ctx.db.query(
-    `INSERT INTO bonus_ledger (id, tenant_id, client_id, kind, delta, balance_after, payment_id, reason, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [crypto.randomUUID(), ctx.actor.tenantId, clientId, kind, applied, balance + applied, opts.paymentId ?? null, opts.reason ?? null, ctx.actor.userId],
+    `INSERT INTO bonus_ledger (id, tenant_id, client_id, kind, delta, balance_after, payment_id, reason, created_by, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
+       -- Moves made in one request keep their order: never at or before the client's last move.
+       GREATEST($10::timestamptz, (SELECT MAX(created_at) + interval '1 millisecond' FROM bonus_ledger WHERE client_id = $3)))`,
+    [crypto.randomUUID(), ctx.actor.tenantId, clientId, kind, applied, balance + applied, opts.paymentId ?? null, opts.reason ?? null, ctx.actor.userId, ctx.now.toISOString()],
   );
   return applied;
 }
@@ -141,10 +232,21 @@ export async function clientLoyalty(ctx: Ctx, clientId: string, opts: { appointm
     const services = await many<{ service_id: string | null }>(ctx.db, "SELECT service_id FROM appointment_services WHERE appointment_id = $1", [opts.appointmentId]);
     eligible = new Set(services.map((row) => row.service_id).filter(Boolean) as string[]);
   }
+  const balance = Number(client.bonus_balance);
+  const spendMinor = await clientSpend(ctx, clientId);
+  const { current: tier, next: nextTier } = tierFor(program.tiers, spendMinor);
+  // Points that burn within two weeks, so the desk can tell the client.
+  const expiringSoon = program.bonusExpireDays && balance > 0
+    ? await expiringPoints(ctx, clientId, new Date(ctx.now.getTime() - (program.bonusExpireDays - 14) * 86_400_000), balance)
+    : 0;
   return {
     clientId,
     program,
-    bonusBalance: Number(client.bonus_balance),
+    bonusBalance: balance,
+    spendMinor,
+    tier,
+    nextTier: nextTier ? { ...nextTier, leftMinor: nextTier.minSpendMinor - spendMinor } : null,
+    expiringSoon,
     memberships: memberships.map((row) => {
       const view = presentMembership(row, date);
       const fits = eligible ? !row.service_ids.length || row.service_ids.some((id) => eligible!.has(id)) : true;
@@ -577,10 +679,13 @@ export async function afterPaymentPosted(ctx: Ctx, paymentId: string) {
 
   const program = await settings(ctx);
   if (payment.direction === "in") {
-    if (program.bonus_enabled && payment.client_id && Number(program.bonus_earn_bps) > 0) {
-      const base = await earnBase(ctx, paymentId, program.bonus_earn_on_products);
-      const points = Math.floor((base * Number(program.bonus_earn_bps)) / 10000);
-      if (points > 0) await bonusMove(ctx, payment.client_id, "earn", points, { paymentId, reason: `${Number(program.bonus_earn_bps) / 100}% от оплаты` });
+    if (program.bonus_enabled && payment.client_id) {
+      // LOY-TIER-01: the tier reached with this payment sets the rate.
+      const { current: tier } = tierFor(presentSettings(program).tiers, await clientSpend(ctx, payment.client_id));
+      const bps = tier ? tier.earnBps : Number(program.bonus_earn_bps);
+      const base = bps > 0 ? await earnBase(ctx, paymentId, program.bonus_earn_on_products) : 0;
+      const points = Math.floor((base * bps) / 10000);
+      if (points > 0) await bonusMove(ctx, payment.client_id, "earn", points, { paymentId, reason: `${bps / 100}% от оплаты${tier ? ` · ${tier.title}` : ""}` });
     }
     return;
   }

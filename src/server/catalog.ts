@@ -95,9 +95,13 @@ export async function updateService(
     active: boolean;
     bufferAfterMin: number;
     rebookDays: number | null;
+    onlineDepositMinor: number | null;
   }>,
 ) {
   assertCatalog(ctx);
+  if (input.onlineDepositMinor !== undefined && input.onlineDepositMinor !== null && !(Number.isInteger(input.onlineDepositMinor) && input.onlineDepositMinor >= 0)) {
+    throw new AppError("VALIDATION", "Предоплата: сумма от 0");
+  }
   if (input.rebookDays !== undefined && input.rebookDays !== null && !(Number.isInteger(input.rebookDays) && input.rebookDays >= 1 && input.rebookDays <= 365)) {
     throw new AppError("VALIDATION", "Повторный визит: от 1 до 365 дней");
   }
@@ -119,7 +123,8 @@ export async function updateService(
        online_visible = COALESCE($8, online_visible),
        active = COALESCE($9, active),
        buffer_after_min = COALESCE($10, buffer_after_min),
-       rebook_days = CASE WHEN $11 THEN $12::int ELSE rebook_days END
+       rebook_days = CASE WHEN $11 THEN $12::int ELSE rebook_days END,
+       online_deposit_minor = CASE WHEN $13 THEN $14::int ELSE online_deposit_minor END
      WHERE id = $1`,
     [
       id,
@@ -134,6 +139,8 @@ export async function updateService(
       input.bufferAfterMin ?? null,
       input.rebookDays !== undefined,
       input.rebookDays ?? null,
+      input.onlineDepositMinor !== undefined,
+      input.onlineDepositMinor ?? null,
     ],
   );
   return getService(ctx, id);
@@ -192,6 +199,7 @@ async function getService(ctx: Ctx, id: string) {
     sort: number;
     buffer_after_min: number;
     rebook_days: number | null;
+    online_deposit_minor: number | null;
   }>(ctx.db, "SELECT * FROM services WHERE id = $1", [id]);
   if (!row) throw new AppError("NOT_FOUND", "Услуга не найдена");
   const staff = await many<{ staff_id: string }>(ctx.db, "SELECT staff_id FROM service_staff WHERE service_id = $1", [id]);
@@ -207,6 +215,7 @@ async function getService(ctx: Ctx, id: string) {
     sort: Number(row.sort),
     bufferAfterMin: Number(row.buffer_after_min),
     rebookDays: row.rebook_days === null ? null : Number(row.rebook_days),
+    onlineDepositMinor: row.online_deposit_minor === null ? null : Number(row.online_deposit_minor),
     staffIds: staff.map((item) => item.staff_id),
   };
 }

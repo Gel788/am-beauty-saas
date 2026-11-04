@@ -219,7 +219,7 @@ master gets `(10000 − assistant_percent_bps)`, assistant gets rest.
 ### PAYROLL-VIEW-SELF-01
 - Master: период, total, список визитов (дата, услуга, база, %), чаевые, корректировки.  
 - Без чужих данных и без правил % других.  
-- Export PDF P3.
+- Export PDF: «Расчётный листок» в периоде, кнопка «Печать / PDF» (браузер сохраняет PDF).
 
 ---
 

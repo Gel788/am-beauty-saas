@@ -131,6 +131,15 @@ export async function createPayLink(
   input: { amountMinor?: number; purpose?: "deposit" | "visit"; origin: string; send?: boolean },
 ) {
   if (!isAdminPlus(ctx.actor) && ctx.actor.role !== "accountant") throw new AppError("FORBIDDEN", "Недостаточно прав");
+  return issuePayLink(ctx, appointmentId, input);
+}
+
+/** The link itself; callers check who may ask for it (the desk, or the online booking for its own deposit). */
+export async function issuePayLink(
+  ctx: Ctx,
+  appointmentId: string,
+  input: { amountMinor?: number; purpose?: "deposit" | "visit"; origin: string; send?: boolean },
+) {
   const appt = await one<{ id: string; branch_id: string; client_id: string | null; status: string; starts_at: Date }>(
     ctx.db,
     "SELECT id, branch_id, client_id, status, starts_at FROM appointments WHERE id = $1 FOR UPDATE",
@@ -248,6 +257,8 @@ export async function applyProviderStatus(ctx: Ctx, id: string, status: Provider
   const due = row.appointment_id ? await appointmentDue(ctx, row.appointment_id) : 0;
   const amount = Number(row.amount_minor);
   if (row.appointment_id && appt && appt.status !== "cancelled" && due >= amount) {
+    // OB-PAY-01: the online booking waited for this deposit; it is confirmed now.
+    await ctx.db.query("UPDATE appointments SET deposit_due_at = NULL WHERE id = $1", [row.appointment_id]);
     const asDeposit = row.purpose === "deposit" && ["scheduled", "confirmed"].includes(appt.status);
     const paid = await createPayment(actorCtx, {
       branchId: row.branch_id,

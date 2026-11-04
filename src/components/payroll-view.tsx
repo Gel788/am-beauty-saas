@@ -75,6 +75,7 @@ const LINE_TYPES: Record<string, string> = {
   penalty: "Штраф",
   adjustment: "Корректировка",
   refund_clawback: "Сторно",
+  group: "Группа",
 };
 const SETUP = ["owner", "admin", "accountant", "super"];
 const MONEY = ["owner", "accountant", "super"];
@@ -92,6 +93,12 @@ function previousMonth(today: string) {
 
 function rateLabel(line: Line, money: (n: number) => string) {
   const rate = line.rate as { scheme?: string; percentBps?: number; fixedMinor?: number };
+  if (line.type === "group") {
+    const group = line.rate as { mode?: string; payMinor?: number; bps?: number; arrived?: number; revenueMinor?: number };
+    if (group.mode === "per_attendee") return `${group.arrived ?? 0} чел. × ${money(Number(group.payMinor ?? 0))}`;
+    if (group.mode === "percent") return `${Number(group.bps ?? 0) / 100}% от ${money(Number(group.revenueMinor ?? 0))}`;
+    return "за занятие";
+  }
   if (line.type !== "service") return "";
   if (rate.scheme === "fixed_per_service") return `фикс ${money(Number(rate.fixedMinor ?? 0))}`;
   const materials = Number((line.rate as { materialsMinor?: number }).materialsMinor ?? 0);
@@ -218,6 +225,7 @@ function PeriodSheet({ id, role, money, onError, onBack }: { id: string; role: s
   const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<"cash" | "transfer">("transfer");
   const [open, setOpen] = useState<string | null>(null);
+  const [slip, setSlip] = useState<Item | null>(null);
 
   useEffect(() => {
     api<Sheet>(`/api/payroll/periods/${id}`).then(setSheet).catch((err: ApiError) => onError(err.message));
@@ -305,6 +313,7 @@ function PeriodSheet({ id, role, money, onError, onBack }: { id: string; role: s
               {item.tipMinor > 0 && <span className="muted">чаевые {money(item.tipMinor)}</span>}
               {item.deductionMinor > 0 && <span className="muted">удержано {money(item.deductionMinor)}</span>}
               <b>к выплате {money(item.payoutMinor)}</b>
+              <button className="btn-ghost" onClick={() => setSlip(item)}>Расчётный листок</button>
               {sheet.status === "approved" && canMoney && item.status !== "paid" && (
                 <button className="btn" disabled={busy} onClick={() => act("pay", { staffId: item.staffId, paidOn, method })}>Выплатить</button>
               )}
@@ -341,8 +350,54 @@ function PeriodSheet({ id, role, money, onError, onBack }: { id: string; role: s
         </div>
       ))}
 
+      {slip && <PaySlip sheet={sheet} item={slip} money={money} onClose={() => setSlip(null)} />}
       {editable && canMoney && sheet.status === "calculated" && <AddForStaff onSave={(body) => act("lines", body)} present={sheet.items.map((item) => item.staffId)} />}
     </>
+  );
+}
+
+/** PAYROLL-VIEW-SELF-01: a printable slip; «Сохранить как PDF» in the print dialog gives the file. */
+function PaySlip({ sheet, item, money, onClose }: { sheet: Sheet; item: Item; money: (n: number) => string; onClose: () => void }) {
+  const STATUS_TEXT: Record<string, string> = { draft: "черновик", calculated: "рассчитан", approved: "утверждён", paid: "выплачен", locked: "закрыт" };
+  return (
+    <div className="modal-backdrop no-print-backdrop" onMouseDown={onClose}>
+      <div className="payslip" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="Расчётный листок">
+        <div className="spread no-print">
+          <b>Расчётный листок</b>
+          <div className="row">
+            <button className="btn-gradient" onClick={() => window.print()}>Печать / PDF</button>
+            <button className="icon-btn" onClick={onClose} aria-label="Закрыть">×</button>
+          </div>
+        </div>
+        <h2 className="display" style={{ margin: "12px 0 2px" }}>{item.staffName}</h2>
+        <p className="muted" style={{ margin: 0 }}>Период {dayLabel(sheet.startsOn)} — {dayLabel(sheet.endsOn)} · {STATUS_TEXT[item.status === "paid" ? "paid" : sheet.status] ?? sheet.status}</p>
+        <table className="report-table" style={{ marginTop: 14 }}>
+          <thead><tr><th>Дата</th><th>Строка</th><th>Расчёт</th><th className="num">Сумма</th></tr></thead>
+          <tbody>
+            {item.lines.map((line) => (
+              <tr key={line.id}>
+                <td>{line.occurredOn ? dayLabel(line.occurredOn) : "—"}</td>
+                <td>{LINE_TYPES[line.type] ?? line.type}: {line.title}{line.reason ? ` · ${line.reason}` : ""}</td>
+                <td className="muted">{rateLabel(line, money)}</td>
+                <td className="num">{money(line.resultMinor)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="payslip-totals">
+          <span>Начислено</span><b>{money(item.accrualMinor)}</b>
+          {item.tipMinor > 0 && <><span>Чаевые</span><b>{money(item.tipMinor)}</b></>}
+          {item.deductionMinor > 0 && <><span>Удержано</span><b>−{money(item.deductionMinor)}</b></>}
+          <span>К выплате</span><b className="big">{money(item.payoutMinor)}</b>
+          {item.carryDebt && <><span>Долг мастера</span><b>{money(-item.totalMinor)}</b></>}
+          {item.paidOn && <><span>Выплачено</span><b>{dayLabel(item.paidOn)}{item.paidMethod === "cash" ? ", наличными" : item.paidMethod === "transfer" ? ", переводом" : ""}</b></>}
+        </div>
+        <div className="payslip-sign">
+          <span>Ознакомлен(а): ____________________</span>
+          <span>Выдал(а): ____________________</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

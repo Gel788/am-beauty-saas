@@ -18,6 +18,8 @@ type ClientHit = { id: string; name: string; phones: { phone: string }[] };
 type Loyalty = {
   program: { bonusEnabled: boolean; bonusBurnMaxBps: number };
   bonusBalance: number;
+  tier?: { title: string; earnBps: number } | null;
+  expiringSoon?: number;
   memberships: { id: string; title: string; visitsLeft: number; visitsTotal: number; validTo: string; serviceIds: string[]; usableNow: boolean }[];
 };
 const LOYALTY_METHODS = ["bonus", "certificate", "membership"];
@@ -573,6 +575,8 @@ export function RecordDrawer({
                 {loyalty && (loyalty.program.bonusEnabled || loyalty.memberships.length > 0) && (
                   <div className="chips">
                     {loyalty.program.bonusEnabled && <span className="chip">Баллы: {formatMoney(loyalty.bonusBalance)}</span>}
+                    {loyalty.tier && <span className="chip">{loyalty.tier.title} · {loyalty.tier.earnBps / 100}%</span>}
+                    {!!loyalty.expiringSoon && <span className="chip chip-warn">Сгорит за 2 недели: {formatMoney(loyalty.expiringSoon)}</span>}
                     {usableMemberships.map((item) => (
                       <span key={item.id} className="chip">{item.title}: {item.visitsLeft} из {item.visitsTotal}</span>
                     ))}

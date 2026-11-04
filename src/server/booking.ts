@@ -12,6 +12,7 @@ import {
 } from "@/domain/time";
 import { createAppointment, lockStaff } from "./appointments";
 import { onlineFields, validateCustom } from "./custom-fields";
+import { depositAmount, startDeposit } from "./deposit";
 import { publicEvents } from "./groups";
 import { resourceChecker } from "./resources";
 import { audit } from "./audit";
@@ -37,6 +38,7 @@ type ServiceRow = {
   buffer_after_min: number;
   price_minor: number;
   category_id: string | null;
+  online_deposit_minor: number | null;
 };
 
 type StaffRow = { id: string; display_name: string; color: string; specialties: string };
@@ -92,7 +94,7 @@ export async function loadOnlineBranch(ctx: Ctx, branchId: string): Promise<Onli
 async function loadOnlineService(ctx: Ctx, serviceId: string): Promise<ServiceRow> {
   const service = await one<ServiceRow>(
     ctx.db,
-    `SELECT id, title, duration_min, buffer_after_min, price_minor, category_id
+    `SELECT id, title, duration_min, buffer_after_min, price_minor, category_id, online_deposit_minor
      FROM services WHERE id = $1 AND active AND online_visible`,
     [serviceId],
   );
@@ -137,7 +139,7 @@ export async function publicCatalog(ctx: Ctx, branchId: string) {
   );
   const services = await many<ServiceRow & { staff_ids: string[] }>(
     ctx.db,
-    `SELECT sv.id, sv.title, sv.duration_min, sv.buffer_after_min, sv.price_minor, sv.category_id,
+    `SELECT sv.id, sv.title, sv.duration_min, sv.buffer_after_min, sv.price_minor, sv.category_id, sv.online_deposit_minor,
             array_agg(s.id ORDER BY s.display_name, s.id) AS staff_ids
      FROM services sv
      JOIN service_staff ss ON ss.service_id = sv.id
@@ -166,6 +168,7 @@ export async function publicCatalog(ctx: Ctx, branchId: string) {
       categoryId: service.category_id,
       durationMin: Number(service.duration_min),
       priceMinor: Number(service.price_minor),
+      depositMinor: depositAmount(branch, service),
       staffIds: service.staff_ids,
     })),
     staff: staff.map((row) => ({ id: row.id, name: row.display_name, color: row.color, specialties: row.specialties })),
@@ -484,6 +487,10 @@ export async function confirmBooking(
   let promo: { code: string; discountMinor: number; priceMinor: number } | null = null;
   if (input.promoCode?.trim()) promo = await applyPromo(ctx, appointment.id, input.promoCode, { online: true });
 
+  // OB-PAY-01: the slot is ours, the booking waits for the deposit and is cancelled without it.
+  const depositMinor = depositAmount(branch, { ...service, price_minor: promo ? promo.priceMinor : appointment.priceMinor });
+  const deposit = depositMinor > 0 ? await startDeposit(ctx, branch, appointment.id, depositMinor) : null;
+
   const token = randomBytes(32).toString("hex");
   await ctx.db.query("UPDATE appointments SET cancel_token_hash = $2 WHERE id = $1", [appointment.id, sha256(token)]);
   const cancelUntil = new Date(new Date(appointment.startsAt).getTime() - Number(branch.online_cancel_hours) * 3600000);
@@ -501,6 +508,7 @@ export async function confirmBooking(
     telegramUrl: (await telegramConfigured(ctx)) ? (await issueTelegramLink(ctx, { clientId: client.id })).url : null,
     cancelUntil: cancelUntil.toISOString(),
     branch: presentBranch(branch),
+    deposit,
   };
   await ctx.db.query(
     "UPDATE slot_holds SET appointment_id = $2, idempotency_key = $3, result = $4::jsonb WHERE id = $1",

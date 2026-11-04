@@ -14,7 +14,7 @@ type Branch = {
   cancelHours: number;
   maxAdvanceDays: number;
 };
-type Service = { id: string; title: string; categoryId: string | null; durationMin: number; priceMinor: number; staffIds: string[] };
+type Service = { id: string; title: string; categoryId: string | null; durationMin: number; priceMinor: number; depositMinor?: number; staffIds: string[] };
 type Staff = { id: string; name: string; color: string; specialties: string };
 type OnlineField = { key: string; entity: "client" | "appointment"; label: string; type: string; options: string[]; required: boolean };
 type GroupEvent = { id: string; title: string; description: string; staffName: string | null; startsAt: string; endsAt: string; date: string; priceMinor: number; freeSeats: number; capacity: number };
@@ -34,6 +34,7 @@ type Booking = {
   cancelToken: string;
   cancelUntil: string;
   telegramUrl: string | null;
+  deposit?: { amountMinor: number; payUrl: string; dueAt: string } | null;
 };
 type Failure = Error & { code?: string; details?: { reason?: string; full?: boolean; field?: string } | null };
 
@@ -302,7 +303,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
                 {group.services.map((item) => (
                   <button key={item.id} className={`bk-service${service?.id === item.id ? " on" : ""}`} onClick={() => pickService(item)}>
                     <span className="bk-service-title">{item.title}</span>
-                    <span className="bk-service-meta">{item.durationMin} мин · {formatMoney(item.priceMinor, branch.currency)}</span>
+                    <span className="bk-service-meta">{item.durationMin} мин · {formatMoney(item.priceMinor, branch.currency)}{item.depositMinor ? ` · предоплата ${formatMoney(item.depositMinor, branch.currency)}` : ""}</span>
                   </button>
                 ))}
               </div>
@@ -425,7 +426,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
                 <span>Хочу получать акции и новости салона</span>
               </label>
               <input className="bk-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
-              <button className="bk-primary" type="submit" disabled={busy}>{busy ? "Записываем…" : "Записаться"}</button>
+              <button className="bk-primary" type="submit" disabled={busy}>{busy ? "Записываем…" : service?.depositMinor ? `Записаться и внести ${formatMoney(service.depositMinor, branch.currency)}` : "Записаться"}</button>
               <button className="bk-link" type="button" onClick={() => backToSlots()}>Назад к выбору времени</button>
             </form>
           </section>
@@ -433,10 +434,16 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
 
         {step === 4 && booking && (
           <section className="bk-done">
-            <div className="bk-check">✓</div>
-            <h2>Вы записаны</h2>
+            <div className="bk-check">{booking.deposit ? "₽" : "✓"}</div>
+            <h2>{booking.deposit ? "Осталось внести предоплату" : "Вы записаны"}</h2>
             <p className="bk-when">{formatWhen(booking.startsAt, tz)}</p>
             <p>{booking.serviceTitle} · {booking.staffName} · {formatMoney(booking.priceMinor, branch.currency)}</p>
+            {booking.deposit && (
+              <div className="bk-deposit">
+                <p>Время закреплено за вами. Внесите предоплату {formatMoney(booking.deposit.amountMinor, branch.currency)} до {new Date(booking.deposit.dueAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: tz })}, иначе запись отменится.</p>
+                <a className="bk-primary" href={booking.deposit.payUrl} target="_top">Оплатить {formatMoney(booking.deposit.amountMinor, branch.currency)}</a>
+              </div>
+            )}
             {booking.promo && <p className="bk-muted">Промокод {booking.promo.code}: скидка {formatMoney(booking.promo.discountMinor, branch.currency)}</p>}
             <p className="bk-muted">
               Отменить запись можно до {formatWhen(booking.cancelUntil, tz)} по ссылке:{" "}

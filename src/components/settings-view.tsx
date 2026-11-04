@@ -47,6 +47,8 @@ type Branch = {
   acquiringEnabled: boolean;
   acquiringProvider: string;
   acquiringLinkHours: number;
+  onlineDepositBps: number;
+  onlineDepositMinutes: number;
 };
 
 export function SettingsView() {
@@ -217,6 +219,8 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
               acquiringEnabled: draft.acquiringEnabled,
               acquiringProvider: draft.acquiringProvider,
               acquiringLinkHours: draft.acquiringLinkHours,
+              onlineDepositBps: draft.onlineDepositBps,
+              onlineDepositMinutes: draft.onlineDepositMinutes,
             }),
           });
           onSaved(saved);
@@ -291,6 +295,17 @@ function FiscalSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch:
         </div>
         <div className="field"><label>Ссылка действует, часов</label><input type="number" min={1} max={168} value={draft.acquiringLinkHours} onChange={(event) => set("acquiringLinkHours", Number(event.target.value))} /></div>
       </div>
+      <div className="form-grid">
+        <div className="field">
+          <label>Предоплата при онлайн-записи, % от цены</label>
+          <input type="number" min={0} max={100} step={5} value={draft.onlineDepositBps / 100} onChange={(event) => set("onlineDepositBps", Math.round(Number(event.target.value) * 100))} />
+        </div>
+        <div className="field">
+          <label>Время на оплату, минут</label>
+          <input type="number" min={10} max={1440} value={draft.onlineDepositMinutes} onChange={(event) => set("onlineDepositMinutes", Number(event.target.value))} />
+        </div>
+      </div>
+      <span className="muted" style={{ fontSize: 12.5 }}>0% — без предоплаты. Если клиент не оплатил вовремя, запись отменяется и время освобождается. Для отдельной услуги сумму можно задать в карточке услуги.</span>
       <button className="btn-gradient" type="submit">Сохранить кассу</button>
     </form>
   );

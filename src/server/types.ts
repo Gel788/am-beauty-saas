@@ -64,6 +64,8 @@ export type BranchRow = {
   fiscal_vat: string;
   fiscal_place: string;
   acquiring_enabled: boolean;
+  online_deposit_bps: number;
+  online_deposit_minutes: number;
   acquiring_provider: string;
   acquiring_link_hours: number;
   external_receipts: boolean;

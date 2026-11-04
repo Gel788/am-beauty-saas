@@ -60,6 +60,8 @@ export function presentBranch(branch: BranchRow) {
     acquiringEnabled: branch.acquiring_enabled,
     acquiringProvider: branch.acquiring_provider,
     acquiringLinkHours: Number(branch.acquiring_link_hours),
+    onlineDepositBps: Number(branch.online_deposit_bps),
+    onlineDepositMinutes: Number(branch.online_deposit_minutes),
   };
 }
 
@@ -71,6 +73,8 @@ const INT_FIELDS: Record<string, [number, number, string]> = {
   onlineMaxActivePerPhone: [1, 50, "Будущих записей на телефон: от 1 до 50"],
   reminderHours: [1, 168, "Напоминание: от 1 до 168 часов до визита"],
   acquiringLinkHours: [1, 168, "Ссылка на оплату действует от 1 до 168 часов"],
+  onlineDepositBps: [0, 10000, "Предоплата: от 0 до 100%"],
+  onlineDepositMinutes: [10, 1440, "Время на предоплату: от 10 минут до суток"],
 };
 
 /** The salon part of the public link /b/{tenantSlug}/{branchSlug}. Owner only. */
@@ -125,10 +129,12 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     acquiringEnabled: "acquiring_enabled",
     acquiringProvider: "acquiring_provider",
     acquiringLinkHours: "acquiring_link_hours",
+    onlineDepositBps: "online_deposit_bps",
+    onlineDepositMinutes: "online_deposit_minutes",
   };
   // Forms send the whole branch back, so only a changed value counts as an attempt.
   const before = presentBranch(await loadBranch(ctx, id)) as Record<string, unknown>;
-  const fiscalKeys = ["fiscalEnabled", "externalReceipts", "fiscalProvider", "fiscalInn", "fiscalTaxation", "fiscalVat", "fiscalPlace", "acquiringEnabled", "acquiringProvider", "acquiringLinkHours"];
+  const fiscalKeys = ["fiscalEnabled", "externalReceipts", "fiscalProvider", "fiscalInn", "fiscalTaxation", "fiscalVat", "fiscalPlace", "acquiringEnabled", "acquiringProvider", "acquiringLinkHours", "onlineDepositBps", "onlineDepositMinutes"];
   if (fiscalKeys.some((key) => input[key] !== undefined && input[key] !== before[key]) && ctx.actor.role !== "owner" && ctx.actor.role !== "super") {
     throw new AppError("FORBIDDEN", "Кассу и онлайн-оплату настраивает владелец");
   }

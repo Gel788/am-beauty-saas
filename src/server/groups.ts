@@ -31,6 +31,9 @@ type EventRow = {
   color: string;
   series_id: string | null;
   cancel_reason: string | null;
+  host_pay_mode: HostPayMode;
+  host_pay_minor: number;
+  host_pay_bps: number;
   staff_name?: string | null;
   resource_title?: string | null;
   enrolled?: number;
@@ -38,6 +41,8 @@ type EventRow = {
   arrived?: number;
   paid?: number;
 };
+export type HostPayMode = "none" | "per_attendee" | "flat" | "percent";
+const HOST_PAY_MODES: HostPayMode[] = ["none", "per_attendee", "flat", "percent"];
 type ParticipantStatus = "enrolled" | "waitlisted" | "arrived" | "no_show" | "cancelled";
 type ParticipantRow = {
   id: string;
@@ -81,6 +86,9 @@ function presentEvent(row: EventRow) {
     color: row.color,
     seriesId: row.series_id,
     cancelReason: row.cancel_reason,
+    hostPayMode: row.host_pay_mode,
+    hostPayMinor: Number(row.host_pay_minor),
+    hostPayBps: Number(row.host_pay_bps),
     enrolled,
     waitlisted: Number(row.waitlisted ?? 0),
     arrived: Number(row.arrived ?? 0),
@@ -161,6 +169,9 @@ type EventInput = {
   priceMinor?: unknown;
   onlineVisible?: unknown;
   color?: unknown;
+  hostPayMode?: unknown;
+  hostPayMinor?: unknown;
+  hostPayBps?: unknown;
   /** GRP-RECUR-01: also create the same event on the next N weeks. */
   repeatWeeks?: unknown;
   acknowledgeSoft?: boolean;
@@ -218,14 +229,22 @@ export async function saveEvent(ctx: Ctx, id: string | null, input: EventInput) 
   if (serviceId && !(await one(ctx.db, "SELECT 1 FROM services WHERE id = $1", [serviceId]))) throw new AppError("VALIDATION", "Услуга не найдена");
   const description = String(input.description ?? current?.description ?? "").trim().slice(0, 1000);
   const onlineVisible = input.onlineVisible === undefined ? current?.online_visible ?? true : Boolean(input.onlineVisible);
+  // GRP-COMPLETE-01: the host's pay for this class goes into payroll when it is completed.
+  const hostPayMode = (input.hostPayMode ?? current?.host_pay_mode ?? "none") as HostPayMode;
+  if (!HOST_PAY_MODES.includes(hostPayMode)) throw new AppError("VALIDATION", "Неизвестный способ оплаты ведущему");
+  const hostPayMinor = Number(input.hostPayMinor ?? current?.host_pay_minor ?? 0);
+  const hostPayBps = Number(input.hostPayBps ?? current?.host_pay_bps ?? 0);
+  if (!Number.isInteger(hostPayMinor) || hostPayMinor < 0) throw new AppError("VALIDATION", "Оплата ведущему: сумма от 0");
+  if (!Number.isInteger(hostPayBps) || hostPayBps < 0 || hostPayBps > 10000) throw new AppError("VALIDATION", "Оплата ведущему: от 0 до 100%");
   const color = /^#[0-9a-f]{6}$/i.test(String(input.color ?? "")) ? String(input.color) : current?.color ?? "#ffe3ef";
 
   if (current) {
     await checkConflicts(ctx, { id: current.id, staffId, resourceId, starts, ends }, input.acknowledgeSoft);
     await ctx.db.query(
       `UPDATE group_events SET title = $2, description = $3, staff_id = $4, resource_id = $5, service_id = $6, starts_at = $7, ends_at = $8,
-         capacity = $9, price_minor = $10, online_visible = $11, color = $12, updated_at = now() WHERE id = $1`,
-      [current.id, title, description, staffId, resourceId, serviceId, starts.toISOString(), ends.toISOString(), capacity, priceMinor, onlineVisible, color],
+         capacity = $9, price_minor = $10, online_visible = $11, color = $12, host_pay_mode = $13, host_pay_minor = $14, host_pay_bps = $15,
+         updated_at = now() WHERE id = $1`,
+      [current.id, title, description, staffId, resourceId, serviceId, starts.toISOString(), ends.toISOString(), capacity, priceMinor, onlineVisible, color, hostPayMode, hostPayMinor, hostPayBps],
     );
     // More seats: the waitlist moves up.
     if (capacity > Number(current.capacity)) await promoteWaitlist(ctx, current.id);
@@ -243,9 +262,11 @@ export async function saveEvent(ctx: Ctx, id: string | null, input: EventInput) 
     const eventId = crypto.randomUUID();
     if (!firstId) firstId = eventId;
     await ctx.db.query(
-      `INSERT INTO group_events (id, tenant_id, branch_id, title, description, staff_id, resource_id, service_id, starts_at, ends_at, capacity, price_minor, online_visible, color, series_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      [eventId, ctx.actor.tenantId, branch.id, title, description, staffId, resourceId, serviceId, s.toISOString(), e.toISOString(), capacity, priceMinor, onlineVisible, color, seriesId, ctx.actor.userId],
+      `INSERT INTO group_events (id, tenant_id, branch_id, title, description, staff_id, resource_id, service_id, starts_at, ends_at, capacity, price_minor, online_visible, color, series_id, created_by,
+         host_pay_mode, host_pay_minor, host_pay_bps)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      [eventId, ctx.actor.tenantId, branch.id, title, description, staffId, resourceId, serviceId, s.toISOString(), e.toISOString(), capacity, priceMinor, onlineVisible, color, seriesId, ctx.actor.userId,
+        hostPayMode, hostPayMinor, hostPayBps],
     );
     await audit(ctx, { branchId, entity: "group_event", entityId: eventId, action: "group.created", diff: { title, startsAt: s.toISOString(), capacity, seriesId } });
   }
@@ -413,7 +434,7 @@ export async function completeEvent(ctx: Ctx, eventId: string) {
   if (new Date(event.starts_at).getTime() > ctx.now.getTime()) throw new AppError("VALIDATION", "Занятие ещё не началось");
   await ctx.db.query("UPDATE group_participants SET status = 'no_show', updated_at = now() WHERE event_id = $1 AND status = 'enrolled'", [eventId]);
   await ctx.db.query("UPDATE group_participants SET status = 'cancelled', updated_at = now() WHERE event_id = $1 AND status = 'waitlisted'", [eventId]);
-  await ctx.db.query("UPDATE group_events SET status = 'completed', updated_at = now() WHERE id = $1", [eventId]);
+  await ctx.db.query("UPDATE group_events SET status = 'completed', completed_at = $2, updated_at = now() WHERE id = $1", [eventId, ctx.now.toISOString()]);
   await audit(ctx, { branchId: event.branch_id, entity: "group_event", entityId: eventId, action: "group.completed", diff: {} });
   return getEvent(ctx, eventId);
 }

@@ -5,7 +5,7 @@ import { formatMoney, rublesToMinor } from "@/domain/money";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 
-type Service = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[]; categoryId: string | null; rebookDays: number | null };
+type Service = { id: string; title: string; durationMin: number; priceMinor: number; color: string; active: boolean; staffIds: string[]; categoryId: string | null; rebookDays: number | null; onlineDepositMinor: number | null };
 type Staff = { id: string; displayName: string };
 type Category = { id: string; title: string };
 
@@ -95,6 +95,21 @@ export function ServicesView() {
               <option value="">Без повтора</option>
               {[14, 21, 28, 35, 42, 60, 90].map((days) => <option key={days} value={days}>Повтор через {days} дн.</option>)}
             </select>
+            <input
+              className="deposit-input"
+              type="number"
+              min={0}
+              placeholder="Предоплата ₽"
+              title="Предоплата при онлайн-записи. Пусто — как в настройках филиала, 0 — без предоплаты"
+              defaultValue={service.onlineDepositMinor === null ? "" : service.onlineDepositMinor / 100}
+              onBlur={async (event) => {
+                const value = event.target.value.trim();
+                const next = value === "" ? null : Math.round(Number(value) * 100);
+                if (next === service.onlineDepositMinor) return;
+                await api(`/api/services/${service.id}`, { method: "PATCH", body: JSON.stringify({ onlineDepositMinor: next }) });
+                await load();
+              }}
+            />
             <button className="btn-ghost" type="button" disabled={index === 0} onClick={async () => {
               const ids = services.map((item) => item.id);
               [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];

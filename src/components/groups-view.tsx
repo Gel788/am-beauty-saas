@@ -31,6 +31,9 @@ type Event = {
   freeSeats: number;
   seriesId: string | null;
   cancelReason: string | null;
+  hostPayMode: "none" | "per_attendee" | "flat" | "percent";
+  hostPayMinor: number;
+  hostPayBps: number;
 };
 type Participant = { id: string; clientId: string; clientName: string; phone: string | null; status: "enrolled" | "waitlisted" | "arrived" | "no_show" | "cancelled"; source: string; paid: boolean };
 type Detail = Event & { canEdit: boolean; canRun: boolean; participants: Participant[] };
@@ -165,6 +168,8 @@ function EventForm({ branchId, timezone, date, event, onClose, onSaved }: { bran
     resourceId: event?.resourceId ?? "",
     repeatWeeks: 0,
     onlineVisible: event?.onlineVisible ?? true,
+    hostPayMode: event?.hostPayMode ?? "none",
+    hostPay: event ? String(event.hostPayMode === "percent" ? event.hostPayBps / 100 : event.hostPayMinor / 100) : "",
   });
   useEffect(() => {
     api<{ id: string; displayName: string }[]>("/api/staff").then(setStaff).catch(() => undefined);
@@ -184,6 +189,9 @@ function EventForm({ branchId, timezone, date, event, onClose, onSaved }: { bran
       resourceId: form.resourceId || null,
       repeatWeeks: event ? undefined : Number(form.repeatWeeks),
       onlineVisible: form.onlineVisible,
+      hostPayMode: form.hostPayMode,
+      hostPayMinor: form.hostPayMode === "percent" ? 0 : rublesToMinor(Number(String(form.hostPay).replace(",", ".")) || 0),
+      hostPayBps: form.hostPayMode === "percent" ? Math.round((Number(String(form.hostPay).replace(",", ".")) || 0) * 100) : 0,
       acknowledgeSoft,
     };
     try {
@@ -219,6 +227,18 @@ function EventForm({ branchId, timezone, date, event, onClose, onSaved }: { bran
               {rooms.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}
             </select>
           </div>
+          <div className="field">
+            <label>Оплата ведущему</label>
+            <select value={form.hostPayMode} onChange={(e) => setForm({ ...form, hostPayMode: e.target.value as Event["hostPayMode"] })}>
+              <option value="none">Не начислять</option>
+              <option value="per_attendee">За каждого пришедшего, ₽</option>
+              <option value="flat">За занятие, ₽</option>
+              <option value="percent">% от оплат участников</option>
+            </select>
+          </div>
+          {form.hostPayMode !== "none" && (
+            <div className="field"><label>{form.hostPayMode === "percent" ? "Процент" : "Сумма, ₽"}</label><input inputMode="decimal" value={form.hostPay} onChange={(e) => setForm({ ...form, hostPay: e.target.value })} /></div>
+          )}
           {!event && (
             <div className="field">
               <label>Повторять</label>

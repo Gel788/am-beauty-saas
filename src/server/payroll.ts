@@ -38,8 +38,9 @@ type PeriodRow = {
 type Warning = { code: "NO_RULE" | "UNPAID" | "FORCED_OVERLAP" | "NEGATIVE_TOTAL"; message: string; staffId?: string; appointmentId?: string };
 
 type LineInput = {
-  type: "service" | "salary" | "tip" | "refund_clawback";
+  type: "service" | "salary" | "tip" | "refund_clawback" | "group";
   appointmentId?: string | null;
+  groupEventId?: string | null;
   appointmentServiceId?: string | null;
   serviceId?: string | null;
   ruleId?: string | null;
@@ -631,6 +632,53 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
     });
   }
 
+  // GRP-COMPLETE-01: host pay for group classes completed in the period.
+  const groups = await many<{
+    id: string;
+    title: string;
+    staff_id: string;
+    starts_at: Date;
+    host_pay_mode: "per_attendee" | "flat" | "percent";
+    host_pay_minor: number;
+    host_pay_bps: number;
+    arrived: number;
+    revenue: number;
+  }>(
+    ctx.db,
+    `SELECT g.id, g.title, g.staff_id, g.starts_at, g.host_pay_mode, g.host_pay_minor, g.host_pay_bps,
+            (SELECT count(*)::int FROM group_participants p WHERE p.event_id = g.id AND p.status = 'arrived') AS arrived,
+            (SELECT COALESCE(SUM(CASE WHEN pay.direction = 'in' THEN pay.total_minor ELSE -pay.total_minor END), 0)::int
+               FROM group_participants p JOIN payments pay ON pay.id = p.payment_id OR pay.refund_of_id = p.payment_id
+               WHERE p.event_id = g.id AND pay.status IN ('posted', 'refunded')) AS revenue
+     FROM group_events g
+     WHERE g.branch_id = $1 AND g.status = 'completed' AND g.staff_id IS NOT NULL AND g.host_pay_mode <> 'none'
+       AND g.completed_at >= $2 AND g.completed_at < $3
+     ORDER BY g.starts_at`,
+    [branch.id, from, to],
+  );
+  for (const row of groups) {
+    const arrived = Number(row.arrived);
+    const revenue = Math.max(0, Number(row.revenue));
+    const result =
+      row.host_pay_mode === "flat" ? Number(row.host_pay_minor)
+      : row.host_pay_mode === "per_attendee" ? arrived * Number(row.host_pay_minor)
+      : Math.round((revenue * Number(row.host_pay_bps)) / 10000);
+    const how =
+      row.host_pay_mode === "flat" ? "за занятие"
+      : row.host_pay_mode === "per_attendee" ? `${arrived} × ${Number(row.host_pay_minor) / 100} ₽`
+      : `${Number(row.host_pay_bps) / 100}% от ${revenue / 100} ₽`;
+    if (result <= 0) continue;
+    push(row.staff_id, {
+      type: "group",
+      groupEventId: row.id,
+      title: `${row.title} (${how})`,
+      occurredOn: formatLocalDate(new Date(row.starts_at), tz),
+      baseAmountMinor: row.host_pay_mode === "percent" ? revenue : row.host_pay_mode === "per_attendee" ? arrived : 0,
+      rateSnapshot: { mode: row.host_pay_mode, payMinor: Number(row.host_pay_minor), bps: Number(row.host_pay_bps), arrived, revenueMinor: revenue },
+      resultMinor: result,
+    });
+  }
+
   // 5. Keep manual lines: drop only auto lines, then write the fresh ones.
   await ctx.db.query(
     "DELETE FROM payroll_lines WHERE manual = false AND item_id IN (SELECT id FROM payroll_items WHERE period_id = $1)",
@@ -641,8 +689,8 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
     for (const line of lines) {
       await ctx.db.query(
         `INSERT INTO payroll_lines (id, tenant_id, item_id, type, manual, appointment_id, appointment_service_id, service_id, rule_id, title,
-           occurred_on, base_amount_minor, rate_snapshot, result_minor)
-         VALUES ($1,$2,$3,$4,false,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)`,
+           occurred_on, base_amount_minor, rate_snapshot, result_minor, group_event_id)
+         VALUES ($1,$2,$3,$4,false,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)`,
         [
           crypto.randomUUID(),
           ctx.actor.tenantId,
@@ -657,6 +705,7 @@ export async function calculatePeriod(ctx: Ctx, periodId: string) {
           line.baseAmountMinor ?? 0,
           JSON.stringify(line.rateSnapshot ?? {}),
           line.resultMinor,
+          line.groupEventId ?? null,
         ],
       );
     }
