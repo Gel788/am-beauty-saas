@@ -297,6 +297,18 @@ await client.query(
 await client.query("UPDATE services SET online_deposit_minor = 100000 WHERE id = $1", [serviceIds.spa]);
 await client.query("UPDATE group_events SET host_pay_mode = 'per_attendee', host_pay_minor = 50000 WHERE tenant_id = $1", [tenant]);
 
+// OB-SRC-01: part of the visits came through the salon's booking links.
+await client.query(
+  `WITH picked AS (
+     SELECT a.id, a.client_id, (ARRAY['yandex','yandex','2gis','instagram','site'])[1 + (row_number() OVER (ORDER BY a.starts_at) % 5)::int] AS channel
+     FROM appointments a WHERE a.tenant_id = $1 AND a.client_id IS NOT NULL ORDER BY a.starts_at LIMIT 10
+   ), upd AS (
+     UPDATE appointments a SET source = 'online', channel = p.channel FROM picked p WHERE a.id = p.id RETURNING a.client_id, p.channel
+   )
+   UPDATE clients c SET source = 'online', channel = u.channel FROM upd u WHERE c.id = u.client_id`,
+  [tenant],
+);
+
 await client.query("COMMIT");
 await client.end();
 console.log(`Seeded Am Beauty for ${today}. Login olga@ambeauty.local / ambeauty`);
