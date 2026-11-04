@@ -1,3 +1,4 @@
+import { createBranch, currentBranchId, networkSummary, orderByCurrent, setCurrentBranch } from "@/server/network";
 import { pool } from "@/server/db";
 import { addFormula, addPhoto, deleteFormula, deletePhoto, getPhoto, getTechCard, updateHealth } from "@/server/techcard";
 import {
@@ -343,12 +344,13 @@ async function handle(request: NextRequest, parts: string[]) {
   }
 
   if (key === "GET auth/me") {
-    const branches = await asActor(actor, (ctx) => listBranches(ctx));
+    const branches = orderByCurrent(await asActor(actor, (ctx) => listBranches(ctx)), await currentBranchId(actor.userId));
     const density = await getDensity(actor.userId);
     return NextResponse.json({ actor, branches, density });
   }
   if (key === "PUT preferences") {
     const body = await readJson(request);
+    if (body.branchId !== undefined) return NextResponse.json(await asActor(actor, (ctx) => setCurrentBranch(ctx, String(body.branchId))));
     const density = String(body.density ?? "auto") as "auto" | "comfortable" | "compact";
     await setDensity(actor.userId, density);
     return NextResponse.json({ density });
@@ -357,6 +359,13 @@ async function handle(request: NextRequest, parts: string[]) {
   const run = <T>(fn: (ctx: Parameters<Parameters<typeof asActor<T>>[1]>[0]) => Promise<T>) => asActor(actor, fn);
 
   if (key === "GET branches") return NextResponse.json(await run((ctx) => listBranches(ctx)));
+  if (key === "POST branches") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createBranch(ctx, body)), { status: 201 });
+  }
+  if (key === "GET network") {
+    return NextResponse.json(await run((ctx) => networkSummary(ctx, { from: url.searchParams.get("from"), to: url.searchParams.get("to") })));
+  }
   if (key === "PATCH tenant") {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => updateTenantSlug(ctx, String(body.slug ?? ""))));
