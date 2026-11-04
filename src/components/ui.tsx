@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+/** Puts a modal or drawer straight into <body>, so a blurred or scrolled parent can't stretch or clip it. */
+export function Overlay({ children }: { children: ReactNode }) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => setHost(document.body), []);
+  return host ? createPortal(children, host) : null;
+}
 
 type Toast = { id: number; message: string; tone: "ok" | "error" };
 
@@ -46,6 +54,7 @@ export function Modal({
   wide?: boolean;
 }) {
   return (
+    <Overlay>
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className={wide ? "modal modal-wide" : "modal"} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="spread">
@@ -55,6 +64,7 @@ export function Modal({
         <div style={{ marginTop: 12 }}>{children}</div>
       </div>
     </div>
+    </Overlay>
   );
 }
 
