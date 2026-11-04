@@ -10,6 +10,7 @@ import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
 import { AppDevice } from "./pwa";
+import { CallPopup } from "./calls";
 
 type Me = {
   actor: { name: string; role: string };
@@ -134,6 +135,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       {showAi && <AiPanel />}
+      {me && DESK.includes(me.actor.role) && <CallPopup />}
     </div>
   );
 }

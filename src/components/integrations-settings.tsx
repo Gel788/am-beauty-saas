@@ -7,7 +7,7 @@ import { Modal, useToast } from "./ui";
 type Field = { key: string; label: string; secret: boolean; required: boolean; placeholder: string; options: { value: string; label: string }[] | null; hint: string };
 type Integration = {
   provider: string;
-  kind: "telegram" | "sms" | "fiscal" | "acquiring";
+  kind: "telegram" | "sms" | "fiscal" | "acquiring" | "telephony";
   label: string;
   about: string;
   docsUrl: string;
@@ -27,6 +27,7 @@ const GROUPS: { kind: Integration["kind"]; title: string; hint: string }[] = [
   { kind: "sms", title: "SMS", hint: "Для клиентов без Telegram. Работает один шлюз; включение другого выключает первый." },
   { kind: "fiscal", title: "Онлайн-касса (54-ФЗ)", hint: "После подключения выберите кассу в разделе «Чеки и онлайн-оплата» ниже." },
   { kind: "acquiring", title: "Эквайринг: карта и СБП", hint: "Нужен для оплаты по ссылке и предоплаты. Провайдера выбирают в «Чеки и онлайн-оплата»." },
+  { kind: "telephony", title: "Телефония", hint: "При входящем звонке администратор сразу видит, кто звонит: имя, визиты, следующую запись и долг. Пропущенные звонки попадают в уведомления." },
 ];
 
 function Status({ item }: { item: Integration }) {
@@ -92,6 +93,9 @@ export function IntegrationsSettings() {
                   <Status item={item} />
                 </div>
                 <span className="muted" style={{ fontSize: 12.5 }}>{item.about}</span>
+                {item.kind === "telephony" && item.connected && item.webhookUrl && (
+                  <button type="button" className="chip" onClick={() => navigator.clipboard?.writeText(item.webhookUrl!).then(() => toast("Адрес для АТС скопирован"))}>Скопировать адрес для АТС</button>
+                )}
                 {item.statusText && <span className={item.status === "error" ? "integration-error" : "integration-ok"}>{item.account && !item.statusText.includes(item.account) ? `${item.account} · ` : ""}{item.statusText}</span>}
                 <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
                   <button className="btn" disabled={busy} onClick={() => open(item)}>{item.connected ? "Настроить" : "Подключить"}</button>
@@ -140,7 +144,7 @@ export function IntegrationsSettings() {
                 {field.hint && <span className="muted" style={{ fontSize: 12 }}>{field.hint}</span>}
               </div>
             ))}
-            {editing.webhookUrl && editing.kind === "acquiring" && (
+            {editing.webhookUrl && (editing.kind === "acquiring" || editing.kind === "telephony") && (
               <div className="field">
                 <label>Адрес для уведомлений (вставьте в кабинете провайдера)</label>
                 <div className="row" style={{ gap: 8 }}>

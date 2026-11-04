@@ -1,5 +1,6 @@
 import { pool } from "@/server/db";
 import { pushPublicKey, pushStatus, sendTestPush, subscribePush, unsubscribePush } from "@/server/push";
+import { clientCalls, handleTelephonyWebhook, liveCalls, recentCalls } from "@/server/telephony";
 import { addFormula, addPhoto, deleteFormula, deletePhoto, getPhoto, getTechCard, updateHealth } from "@/server/techcard";
 import {
   closeWaitlistEntry,
@@ -311,6 +312,39 @@ async function handle(request: NextRequest, parts: string[]) {
     // Т-Банк wants the bare text OK; the rest take JSON.
     if (result.ack) return new NextResponse(result.ack, { headers: { "content-type": "text/plain; charset=utf-8" } });
     return NextResponse.json(result);
+  }
+
+  if (parts[0] === "webhooks" && parts[1] === "telephony" && parts[2] && parts[3]) {
+    // Zadarma checks the address with ?zd_echo= before it starts sending.
+    const echo = request.nextUrl.searchParams.get("zd_echo");
+    if (method === "GET" && echo) return new NextResponse(echo.slice(0, 200), { headers: { "content-type": "text/plain; charset=utf-8" } });
+    if (method !== "POST") return NextResponse.json({ ok: true });
+    const body = await request.text();
+    const type = request.headers.get("content-type") ?? "";
+    let json: Record<string, unknown> | null = null;
+    if (type.includes("json")) {
+      try {
+        json = JSON.parse(body) as Record<string, unknown>;
+      } catch {
+        json = null;
+      }
+    }
+    try {
+      const result = await handleTelephonyWebhook(parts[2], parts[3], {
+        body,
+        json,
+        form: type.includes("json") ? null : new URLSearchParams(body),
+        headers: request.headers,
+        query: request.nextUrl.searchParams,
+        subpath: parts.slice(4).join("/"),
+      });
+      return NextResponse.json(result);
+    } catch (error) {
+      if (isAppError(error) && error.code === "FORBIDDEN") return NextResponse.json({ error: { code: "FORBIDDEN", message: error.message } }, { status: 403 });
+      if (isAppError(error)) return NextResponse.json({ error: { code: error.code, message: error.message } }, { status: 400 });
+      console.error("telephony", error);
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
   }
 
   if (method === "POST" && parts[0] === "webhooks" && parts[1] === "telegram" && parts[2] === "t" && parts[3] && !parts[4]) {
@@ -710,6 +744,10 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json(await run((ctx) => unsubscribePush(ctx, typeof body.endpoint === "string" ? body.endpoint : undefined)));
   }
   if (key === "POST push/test") return NextResponse.json(await run((ctx) => sendTestPush(ctx)));
+  // TEL-POPUP-01 / TEL-LOG-*
+  if (key === "GET calls/live") return NextResponse.json(await run((ctx) => liveCalls(ctx)));
+  if (key === "GET calls") return NextResponse.json(await run((ctx) => recentCalls(ctx, { missedOnly: request.nextUrl.searchParams.get("missed") === "1" })));
+  if (parts[0] === "clients" && parts[1] && parts[2] === "calls" && !parts[3] && method === "GET") return NextResponse.json(await run((ctx) => clientCalls(ctx, parts[1])));
   if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
   if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {
     const body = await readJson(request);
