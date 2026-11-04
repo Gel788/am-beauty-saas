@@ -5,6 +5,7 @@ import { Download } from "lucide-react";
 import { formatMoney } from "@/domain/money";
 import { addCalendarDays, todayInZone } from "@/domain/time";
 import { api, type ApiError } from "./api";
+import { channelLabel } from "@/domain/channels";
 
 type Totals = {
   revenueMinor: number;
@@ -30,6 +31,7 @@ type Report = {
   staff: { staffId: string; name: string; visits: number; servicesMinor: number; tipsMinor: number; noShow: number; loadPercent: number }[];
   services: { serviceId: string; title: string; count: number; priceMinor: number }[];
   sources: { source: string; clients: number }[];
+  channels: { channel: string | null; bookings: number; completed: number }[];
 };
 type Preset = "7" | "30" | "month" | "prev" | "custom";
 const SOURCE: Record<string, string> = { "walk-in": "С улицы / админ", online: "Онлайн-запись", import: "Перенесены", admin: "Админ" };
@@ -165,8 +167,19 @@ export function PeriodView({ role }: { role: string }) {
               ))}
               <h3 style={{ margin: "10px 0 0" }}>Откуда клиенты</h3>
               {report.sources.map((row) => (
-                <div key={row.source} className="spread" style={{ fontSize: 13 }}><span>{SOURCE[row.source] ?? row.source}</span><span className="muted">{row.clients}</span></div>
+                <div key={row.source} className="spread" style={{ fontSize: 13 }}><span>{row.source.startsWith("online:") ? `Онлайн: ${channelLabel(row.source.slice(7))}` : SOURCE[row.source] ?? row.source}</span><span className="muted">{row.clients}</span></div>
               ))}
+              {report.channels.length > 0 && (
+                <>
+                  <h3 style={{ margin: "10px 0 0" }}>Онлайн-записи по каналам</h3>
+                  {report.channels.map((row) => (
+                    <div key={row.channel ?? "none"} className="spread" style={{ fontSize: 13 }}>
+                      <span>{row.channel ? channelLabel(row.channel) : "Прямая ссылка"}</span>
+                      <span className="muted">{row.bookings} · пришли {row.completed}</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         </>

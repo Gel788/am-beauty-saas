@@ -40,6 +40,7 @@ type ApptRow = {
   status: AppointmentStatus;
   comment: string;
   source: string;
+  channel: string | null;
   color: string;
   version: number;
   force_overlap: boolean;
@@ -453,6 +454,7 @@ export async function getAppointment(ctx: Ctx, id: string) {
     status: row.status,
     comment: row.comment,
     source: row.source,
+    channel: row.channel ?? null,
     color: row.color,
     version: Number(row.version),
     forceOverlap: row.force_overlap,

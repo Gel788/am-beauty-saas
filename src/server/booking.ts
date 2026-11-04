@@ -15,6 +15,7 @@ import { onlineFields, validateCustom } from "./custom-fields";
 import { depositAmount, startDeposit } from "./deposit";
 import { publicEvents } from "./groups";
 import { resourceChecker } from "./resources";
+import { cleanChannel } from "@/domain/channels";
 import { audit } from "./audit";
 import { many, one, poolOne, withSession } from "./db";
 import { loadWorkingIntervals } from "./hours";
@@ -403,9 +404,12 @@ export async function confirmBooking(
     marketing?: boolean;
     /** CF-ONLINE-01: answers to the salon's online fields, by key. */
     custom?: Record<string, unknown>;
+    /** OB-SRC-01: where the client came from (?src= of the link). */
+    channel?: string | null;
   },
 ) {
   const branch = await loadOnlineBranch(ctx, branchId);
+  const channel = cleanChannel(input.channel);
   const hold = await one<HoldRow>(ctx.db, "SELECT * FROM slot_holds WHERE id = $1 AND branch_id = $2 FOR UPDATE", [
     input.holdId,
     branchId,
@@ -482,6 +486,11 @@ export async function confirmBooking(
       throw new AppError("CONFLICT_SLOT", error.message, { reason: "SLOT_TAKEN" });
     }
     throw error;
+  }
+
+  if (channel) {
+    await ctx.db.query("UPDATE appointments SET channel = $2 WHERE id = $1", [appointment.id, channel]);
+    await ctx.db.query("UPDATE clients SET channel = $2 WHERE id = $1 AND channel IS NULL", [client.id, channel]);
   }
 
   let promo: { code: string; discountMinor: number; priceMinor: number } | null = null;

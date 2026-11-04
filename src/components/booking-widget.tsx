@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/domain/money";
+import { cleanChannel } from "@/domain/channels";
 
 type Branch = {
   id: string;
@@ -74,6 +75,13 @@ function dayLabel(date: string) {
 }
 
 const PAGE_DAYS = 7;
+
+/** OB-SRC-01: the link's ?src= (or utm_source) tells the salon where the client came from. */
+function bookingChannel() {
+  if (typeof window === "undefined") return null;
+  const query = new URLSearchParams(window.location.search);
+  return cleanChannel(query.get("src") ?? query.get("utm_source"));
+}
 
 export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; branchSlug: string }) {
   const base = `/api/public/b/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(branchSlug)}`;
@@ -190,7 +198,7 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
     try {
       const result = await call<Booking>(`${base}/bookings`, {
         method: "POST",
-        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, consent: form.consent, marketing: form.marketing, custom, idempotencyKey: idempotencyKey.current }),
+        body: JSON.stringify({ holdId: hold.holdId, name: form.name, phone: form.phone, comment: form.comment, promoCode: form.promo || undefined, consent: form.consent, marketing: form.marketing, custom, channel: bookingChannel(), idempotencyKey: idempotencyKey.current }),
       });
       setBooking(result);
       setHold(null);
@@ -446,7 +454,9 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
             )}
             {booking.promo && <p className="bk-muted">Промокод {booking.promo.code}: скидка {formatMoney(booking.promo.discountMinor, branch.currency)}</p>}
             <p className="bk-muted">
-              Отменить запись можно до {formatWhen(booking.cancelUntil, tz)} по ссылке:{" "}
+              {new Date(booking.cancelUntil).getTime() > Date.now()
+                ? <>Отменить запись можно до {formatWhen(booking.cancelUntil, tz)} по ссылке:{" "}</>
+                : <>До визита мало времени, онлайн отменить уже нельзя, но можно попросить администратора по ссылке:{" "}</>}
               <a href={`/booking/${booking.cancelToken}`} target="_top">управление записью</a>. Сохраните её.
             </p>
             {booking.telegramUrl && (

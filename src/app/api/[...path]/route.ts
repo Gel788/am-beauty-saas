@@ -1159,6 +1159,7 @@ async function handlePublic(request: NextRequest, parts: string[]) {
             consent: body.consent === true,
             marketing: body.marketing === true,
             custom: body.custom && typeof body.custom === "object" ? (body.custom as Record<string, unknown>) : undefined,
+            channel: typeof body.channel === "string" ? body.channel : null,
           }),
         ),
       );

@@ -1,3 +1,4 @@
+import { channelLabel } from "@/domain/channels";
 /**
  * Stage 5: looking beyond one day.
  * - TT-VIEW-04/05: the journal as a week (columns = days) or a month (calendar grid).
@@ -276,9 +277,18 @@ export async function periodReport(ctx: Ctx, raw: Record<string, unknown>) {
   );
   const sources = await many<{ source: string; n: number }>(
     ctx.db,
-    `SELECT COALESCE(c.source, 'без клиента') AS source, count(DISTINCT a.client_id)::int AS n
+    `SELECT CASE WHEN c.source = 'online' AND c.channel IS NOT NULL THEN 'online:' || c.channel ELSE COALESCE(c.source, 'без клиента') END AS source,
+            count(DISTINCT a.client_id)::int AS n
      FROM appointments a LEFT JOIN clients c ON c.id = a.client_id
      WHERE ${visitWhere} AND a.status <> 'cancelled' GROUP BY 1 ORDER BY n DESC`,
+    scopeParams.slice(0, 6),
+  );
+  // OB-SRC-01: online bookings of the period by the link they came through.
+  const channels = await many<{ channel: string | null; n: number; completed: number }>(
+    ctx.db,
+    `SELECT a.channel, count(*)::int AS n, count(*) FILTER (WHERE a.status = 'completed')::int AS completed
+     FROM appointments a WHERE ${visitWhere} AND a.source = 'online'
+     GROUP BY 1 ORDER BY n DESC`,
     scopeParams.slice(0, 6),
   );
   const change = (now: number, was: number) => (was ? Math.round(((now - was) / Math.abs(was)) * 100) : null);
@@ -307,10 +317,16 @@ export async function periodReport(ctx: Ctx, raw: Record<string, unknown>) {
     })),
     services: topServices.map((row) => ({ serviceId: row.service_id, title: row.title, count: Number(row.n), priceMinor: Number(row.price_minor) })),
     sources: sources.map((row) => ({ source: row.source, clients: Number(row.n) })),
+    channels: channels.map((row) => ({ channel: row.channel, bookings: Number(row.n), completed: Number(row.completed) })),
   };
 }
 
 const SOURCE_LABEL: Record<string, string> = { "walk-in": "с улицы / админ", online: "онлайн-запись", import: "перенесены", admin: "админ" };
+
+function sourceLabel(source: string) {
+  if (source.startsWith("online:")) return `онлайн: ${channelLabel(source.slice(7))}`;
+  return SOURCE_LABEL[source] ?? source;
+}
 
 function csvCell(value: string | number) {
   const text = String(value);
@@ -347,7 +363,7 @@ export async function periodReportCsv(ctx: Ctx, raw: Record<string, unknown>) {
     ...report.services.map((row) => [row.title, row.count, rub(row.priceMinor)]),
     [],
     ["Откуда клиенты", "Клиентов"],
-    ...report.sources.map((row) => [SOURCE_LABEL[row.source] ?? row.source, row.clients]),
+    ...report.sources.map((row) => [sourceLabel(row.source), row.clients]),
   ];
   await audit(ctx, { branchId: report.filter.branchId, entity: "report", entityId: report.filter.branchId, action: "report.exported", diff: report.filter });
   return {

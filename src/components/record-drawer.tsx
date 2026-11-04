@@ -9,6 +9,7 @@ import { api, type ApiError } from "./api";
 import { PaymentRow, type PaymentItem } from "./payment-actions";
 import { PayLinkBlock } from "./pay-link";
 import { CustomInputs, type Field } from "./resources-fields-settings";
+import { channelLabel } from "@/domain/channels";
 import { Modal, useToast } from "./ui";
 
 type Line = { serviceId: string; title: string; durationMin: number; priceMinor: number };
@@ -78,6 +79,7 @@ export function RecordDrawer({
   const [payMethod, setPayMethod] = useState("card");
   const [tipRub, setTipRub] = useState("");
   const [source, setSource] = useState("admin");
+  const [channel, setChannel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ledger, setLedger] = useState<PaymentItem[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
@@ -160,6 +162,7 @@ export function RecordDrawer({
       custom: Record<string, unknown>;
       promo: { code: string; discountMinor: number } | null;
       source: string;
+      channel: string | null;
       actions: { id: string; label: string; enabled: boolean; reason: string | null }[];
       history: { action: string; createdAt: string }[];
     }>(`/api/appointments/${seed.id}`).then((row) => {
@@ -190,6 +193,7 @@ export function RecordDrawer({
       setActions(row.actions);
       setHistory(row.history);
       setSource(row.source);
+      setChannel(row.channel ?? null);
       setPayRub(String(Math.max(0, row.services.reduce((sum, line) => sum + line.priceMinor, 0) - row.paidMinor) / 100));
       setLoading(false);
       setDirty(false);
@@ -427,7 +431,7 @@ export function RecordDrawer({
       <aside className="drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="Запись">
         <div className="spread">
           <div>
-            <div className="page-kicker">{seed.id ? STATUS_LABEL[status] : "Новая запись"} {source === "online" ? "· онлайн" : ""}</div>
+            <div className="page-kicker">{seed.id ? STATUS_LABEL[status] : "Новая запись"} {source === "online" ? `· онлайн${channel ? `, ${channelLabel(channel)}` : ""}` : ""}</div>
             <h2 className="display" style={{ fontSize: 26 }}>{clientName || "Запись"}</h2>
             {seed.id && noShows > 0 && <span className="tag noshow-flag" title="За последний год">неявок: {noShows}</span>}
             {seed.id && alert && <div className="health-alert">⚠ {alert}</div>}

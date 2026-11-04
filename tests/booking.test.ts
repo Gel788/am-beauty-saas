@@ -13,6 +13,7 @@ import {
   resolvePublicBranch,
 } from "@/server/booking";
 import { one } from "@/server/db";
+import { periodReport } from "@/server/period";
 import { NOW, at, bindTestDb, createSalon, run } from "./helpers";
 
 bindTestDb();
@@ -260,5 +261,23 @@ describe("online booking", () => {
     expect(result.status).toBe("scheduled");
     const appt = await run(salon.admin, (ctx) => getAppointment(ctx, booking.appointmentId as string));
     expect(appt.history.some((entry) => entry.action === "appointment.cancel_requested")).toBe(true);
+  });
+
+  it("OB-SRC-01 the link's ?src= is kept on the visit and on a new client, and shows in the period report", async () => {
+    const hold = await online((ctx) => createHold(ctx, salon.branchId, { serviceId: salon.serviceId, staffId: salon.staffA, startsAt: at("16:00", "2026-11-16") }));
+    const booking = await online((ctx) =>
+      confirmBooking(ctx, salon.branchId, { holdId: hold.holdId, name: "С Карт", phone: freshPhone(), consent: true, channel: "YandexMaps" }),
+    );
+    const appt = await run(salon.admin, (ctx) => getAppointment(ctx, booking.appointmentId as string));
+    expect(appt.channel).toBe("yandex");
+    const client = await run(salon.admin, (ctx) => one<{ channel: string }>(ctx.db, "SELECT channel FROM clients WHERE id = $1", [appt.clientId]));
+    expect(client?.channel).toBe("yandex");
+    // A junk value is dropped instead of failing the booking.
+    const junk = await online((ctx) => createHold(ctx, salon.branchId, { serviceId: salon.serviceId, staffId: salon.staffA, startsAt: at("18:00", "2026-11-16") }));
+    const plain = await online((ctx) => confirmBooking(ctx, salon.branchId, { holdId: junk.holdId, name: "Без метки", phone: freshPhone(), consent: true, channel: "!!!" }));
+    expect((await run(salon.admin, (ctx) => getAppointment(ctx, plain.appointmentId as string))).channel).toBeNull();
+    const report = await run(salon.owner, (ctx) => periodReport(ctx, { branchId: salon.branchId, from: "2026-11-16", to: "2026-11-16" }));
+    expect(report.channels).toEqual(expect.arrayContaining([{ channel: "yandex", bookings: 1, completed: 0 }, { channel: null, bookings: 1, completed: 0 }]));
+    expect(report.sources).toEqual(expect.arrayContaining([{ source: "online:yandex", clients: 1 }]));
   });
 });

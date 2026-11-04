@@ -1,5 +1,6 @@
 "use client";
 
+import { BOOKING_CHANNELS } from "@/domain/channels";
 import { useEffect, useState } from "react";
 import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
@@ -154,6 +155,7 @@ function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (
           Для сайта: {`<iframe src="${link}" width="100%" height="720" style="border:0"></iframe>`}
         </span>
       </div>
+      <ChannelLinks link={link} />
       <div className="field"><label>Адрес салона в ссылке</label><input value={tenantSlug} onChange={(event) => setTenantSlug(event.target.value)} /></div>
       <div className="field"><label>Адрес филиала в ссылке</label><input value={draft.slug} onChange={(event) => set("slug", event.target.value)} /></div>
       <div className="field">
@@ -347,3 +349,29 @@ function StockSettings({ branch, onSaved }: { branch: Branch; onSaved: (branch: 
   );
 }
 
+
+/** OB-SRC-01: one link per place the salon is listed, so reports show which of them brings clients. */
+function ChannelLinks({ link }: { link: string }) {
+  const toast = useToast();
+  return (
+    <details className="channel-links">
+      <summary>Ссылки для Яндекс Карт, 2ГИС, соцсетей</summary>
+      <p className="muted" style={{ fontSize: 12, margin: "6px 0 8px" }}>
+        Вставьте ссылку в кнопку записи на площадке. Запись придёт в журнал, а в отчёте за период будет видно, откуда пришёл клиент.
+      </p>
+      {BOOKING_CHANNELS.map((channel) => {
+        const url = `${link}?src=${channel.id}`;
+        return (
+          <div key={channel.id} className="channel-row">
+            <div>
+              <b>{channel.label}</b>
+              <small className="muted">{channel.hint}</small>
+            </div>
+            <input readOnly value={url} onFocus={(event) => event.target.select()} />
+            <button type="button" className="btn-ghost" onClick={() => navigator.clipboard?.writeText(url).then(() => toast(`Ссылка для «${channel.label}» скопирована`))}>Копировать</button>
+          </div>
+        );
+      })}
+    </details>
+  );
+}
