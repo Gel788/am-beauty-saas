@@ -116,7 +116,9 @@ img { display: block; max-width: 100%; }
 .user-row strong { display: block; font-size: 13px; white-space: nowrap; }
 .user-row button { margin-left: auto; border: 0; background: transparent; color: #8b8298; }
 
-.stage-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; gap: 10px; overflow: hidden; }
+.stage-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; gap: 10px; overflow-x: hidden; overflow-y: auto; }
+.stage-main > * { flex-shrink: 0; }
+.stage-main > .cal-scroll, .stage-main > .cash-page, .stage-main > .import-grid, .stage-main > .week-grid, .stage-main > .month-grid, .stage-main > .split { flex-shrink: 1; }
 
 .ai-panel {
   width: 304px; flex: none; border-radius: 28px; padding: 14px;
@@ -147,7 +149,7 @@ img { display: block; max-width: 100%; }
 .suggest-card .row { margin-top: 8px; }
 .soon-note { color: var(--faint); font-size: 11px; margin: 0; }
 
-.journal-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.journal-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; flex-wrap: wrap; row-gap: 8px; }
 .journal-title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .page-kicker { color: var(--muted); font-size: 13px; white-space: nowrap; }
 h1, .display { font-family: var(--font-unbounded); font-weight: 520; letter-spacing: -0.045em; margin: 0; }
