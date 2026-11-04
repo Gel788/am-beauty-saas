@@ -177,7 +177,7 @@ export function isPlatformAdmin(actor: Actor) {
   return list.includes(actor.email.toLowerCase());
 }
 
-function assertPlatform(actor: Actor) {
+export function assertPlatform(actor: Actor) {
   if (!isPlatformAdmin(actor)) throw new AppError("FORBIDDEN", "Раздел для команды платформы");
 }
 
@@ -227,5 +227,7 @@ export async function platformUpdateTenant(actor: Actor, id: string, input: { pl
   const suspend = input.suspend === undefined ? null : input.suspend === true;
   await pool.query("SELECT platform_update_tenant($1, $2, $3, $4, $5, $6)", [id, plan, trialEnds, paidUntil, suspend, input.reason ? String(input.reason).slice(0, 200) : null]);
   console.info("platform", JSON.stringify({ by: actor.email, tenant: id, plan, days, suspend }));
+  const what = [plan && plan !== current.plan ? `тариф → ${planById(plan)?.title ?? "Пробный"}` : "", days ? `продлено на ${days} дн.` : "", suspend === true ? "приостановлен" : suspend === false ? "включён" : ""].filter(Boolean).join(", ");
+  if (what) await pool.query("SELECT platform_log($1, $2, $3, $4)", [id, actor.email, `${actor.email}: ${what}`, JSON.stringify({ plan, days, suspend, reason: input.reason ?? null })]);
   return (await platformTenants(actor, now)).find((row) => row.id === id);
 }
