@@ -316,6 +316,88 @@ await client.query(
    UPDATE clients c SET source = 'online', channel = u.channel FROM upd u WHERE c.id = u.client_id`,
   [tenant],
 );
+// Phase 4 · NET demo: three branches with a month of paid visits, so «Сеть салонов» has something to compare.
+const branch3 = "44444444-4444-4444-8444-444444444444";
+await client.query(
+  `INSERT INTO branches (id, tenant_id, name, address, phone, timezone, require_payment_on_complete, slug)
+   VALUES ($1, $2, 'Am Beauty · Хамовники', 'Комсомольский проспект, 21', '+7 495 120-44-21', 'Europe/Moscow', true, 'khamovniki')`,
+  [branch3, tenant],
+);
+await client.query("UPDATE branches SET phone = '+7 495 120-14-14' WHERE id = $1", [branch]);
+await client.query("UPDATE branches SET phone = '+7 495 120-30-30' WHERE id = $1", [branch2]);
+const netStaff = [
+  [branch2, "Софья Миронова", "#f2a7c3", ["manicure", "gel", "removal"]],
+  [branch2, "Кира Алексеева", "#b9a6f0", ["brows", "lashes"]],
+  [branch2, "Глеб Тихонов", "#93b8f2", ["hair", "beard", "color"]],
+  [branch3, "Вера Громова", "#9fd9bf", ["massage", "spa", "back"]],
+  [branch3, "Лиза Карпова", "#f4b5cf", ["manicure", "gel"]],
+];
+const people = { [branch]: Object.entries(links).map(([person, keys]) => [staff[person], keys]), [branch2]: [], [branch3]: [] };
+for (const [where, name, color, keys] of netStaff) {
+  const id = crypto.randomUUID();
+  await client.query("INSERT INTO staff (id, tenant_id, display_name, color) VALUES ($1, $2, $3, $4)", [id, tenant, name, color]);
+  await client.query("INSERT INTO staff_branches (staff_id, branch_id, tenant_id) VALUES ($1, $2, $3)", [id, where, tenant]);
+  for (let weekday = 1; weekday <= 7; weekday += 1) {
+    await client.query(
+      `INSERT INTO schedule_templates (id, tenant_id, branch_id, staff_id, weekday, start_min, end_min, kind) VALUES ($1, $2, $3, $4, $5, 600, 1200, 'work')`,
+      [crypto.randomUUID(), tenant, where, id, weekday],
+    );
+  }
+  for (const key of keys) await client.query("INSERT INTO service_staff (service_id, staff_id, tenant_id) VALUES ($1, $2, $3)", [serviceIds[key], id, tenant]);
+  people[where].push([id, keys]);
+}
+let seedState = 7;
+const rand = (n) => { seedState = (seedState * 1103515245 + 12345) % 2147483648; return seedState % n; };
+const clientList = Object.values(clientIds);
+const netAt = (offset, hours, minutes) => { const base = at(hours, minutes); return new Date(base.getTime() + offset * 86400000); };
+const netShifts = {};
+for (const where of [branch2, branch3]) {
+  netShifts[where] = crypto.randomUUID();
+  await client.query(
+    `INSERT INTO cash_shifts (id, tenant_id, branch_id, opened_by, opening_cash_minor, status, note) VALUES ($1, $2, $3, $4, 500000, 'open', 'утро')`,
+    [netShifts[where], tenant, where, users.olga],
+  );
+}
+netShifts[branch] = shiftId;
+const busy = { [branch]: 3, [branch2]: 2, [branch3]: 2 };
+const misses = { [branch]: 12, [branch2]: 25, [branch3]: 8 };
+for (let offset = -59; offset <= -1; offset += 1) {
+  for (const where of [branch, branch2, branch3]) {
+    for (const [staffId, keys] of people[where]) {
+      let hour = 10 + rand(2);
+      const visits = busy[where] + rand(3) + (where === branch3 && offset > -30 ? 1 : 0) - (where === branch2 && offset > -30 && rand(3) === 0 ? 1 : 0);
+      for (let n = 0; n < visits && hour < 19; n += 1) {
+        const key = keys[rand(keys.length)];
+        const service = services[key];
+        const starts = netAt(offset, hour, rand(2) * 30);
+        const ends = new Date(starts.getTime() + service[1] * 60000);
+        hour += Math.ceil(service[1] / 60) + rand(2);
+        const missed = rand(100) < misses[where];
+        const id = crypto.randomUUID();
+        const clientId = clientList[rand(clientList.length)];
+        const online = rand(3) === 0;
+        await client.query(
+          `INSERT INTO appointments (id, tenant_id, branch_id, staff_id, client_id, starts_at, ends_at, branch_tz, tz_offset_min, status, source, color, created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'Europe/Moscow',180,$8,$9,$10,$11,$11)`,
+          [id, tenant, where, staffId, clientId, starts.toISOString(), ends.toISOString(), missed ? "no_show" : "completed", online ? "online" : "admin", service[3], users.admin],
+        );
+        await client.query(
+          `INSERT INTO appointment_services (id, tenant_id, appointment_id, service_id, title_snapshot, duration_min, price_minor, position) VALUES ($1,$2,$3,$4,$5,$6,$7,0)`,
+          [crypto.randomUUID(), tenant, id, serviceIds[key], service[0], service[1], service[2]],
+        );
+        if (missed) continue;
+        const paymentId = crypto.randomUUID();
+        await client.query(
+          `INSERT INTO payments (id, tenant_id, branch_id, appointment_id, client_id, shift_id, direction, status, total_minor, created_by, posted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,'in','posted',$7,$8,$9)`,
+          [paymentId, tenant, where, id, clientId, netShifts[where], service[2], users.admin, ends.toISOString()],
+        );
+        await client.query(`INSERT INTO payment_lines (id, tenant_id, payment_id, line_type, title, amount_minor) VALUES ($1,$2,$3,'service',$4,$5)`, [crypto.randomUUID(), tenant, paymentId, service[0], service[2]]);
+        await client.query("INSERT INTO payment_tenders (id, tenant_id, payment_id, method, amount_minor) VALUES ($1,$2,$3,'card',$4)", [crypto.randomUUID(), tenant, paymentId, service[2]]);
+      }
+    }
+  }
+}
 
 await client.query("COMMIT");
 await client.end();

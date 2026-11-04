@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { Banknote, BarChart3, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
+import { Banknote, BarChart3, Network, Boxes, Gift, UsersRound, CalendarDays, HeartHandshake, LayoutDashboard, Scissors, Settings, Sparkles, Sun, UserRound, Users, Wallet } from "lucide-react";
 import { api } from "./api";
-import { portraitFor, SALON_PHOTO } from "./portraits";
+import { portraitFor } from "./portraits";
+import { BranchSwitcher } from "./network";
 import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
@@ -18,10 +19,11 @@ type Me = {
 };
 
 const DESK = ["owner", "admin", "super"];
-const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: string; roles: string[]; masterLabel?: string }[] = [
+const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: string; roles: string[]; masterLabel?: string; multi?: boolean }[] = [
   { href: "/me", label: "Мой день", icon: Sun, roles: ["master"] },
   { href: "/journal", label: "Календарь", icon: CalendarDays, roles: [...DESK, "master"] },
   { href: "/dashboard", label: "Дашборд", icon: LayoutDashboard, roles: DESK },
+  { href: "/network", label: "Сеть салонов", icon: Network, roles: ["owner", "super"], multi: true },
   { href: "/clients", label: "Клиенты", icon: Users, roles: [...DESK, "master"] },
   { href: "/groups", label: "Группы", icon: UsersRound, roles: [...DESK, "master"] },
   { href: "/journal#ai-panel", label: "AI-ассистент", icon: Sparkles, badge: "3", roles: DESK },
@@ -80,17 +82,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <span className="am">Am</span>
             <span className="beauty">BEAUTY</span>
           </div>
-          {branch && (
-            <button className="salon-switch" type="button">
-              <img src={SALON_PHOTO} alt="" />
-              <div>
-                <strong>{branch.name}</strong>
-                <span>Филиал 1 из {Math.max(me?.branches.length ?? 1, 1)}</span>
-              </div>
-            </button>
-          )}
+          {me && <BranchSwitcher branches={me.branches} role={me.actor.role} />}
           <nav className="nav">
-            {LINKS.filter((link) => !me || link.roles.includes(me.actor.role)).map((link) => {
+            {LINKS.filter((link) => (!me || link.roles.includes(me.actor.role)) && (!link.multi || (me?.branches.length ?? 0) > 1)).map((link) => {
               const Icon = link.icon;
               const label = me?.actor.role === "master" && link.masterLabel ? link.masterLabel : link.label;
               const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && pathname.startsWith(link.href));

@@ -6,12 +6,14 @@ import { api, type ApiError } from "./api";
 import { useToast } from "./ui";
 import { MessagingSettings } from "./messaging-settings";
 import { IntegrationsSettings } from "./integrations-settings";
+import { BranchesSettings } from "./network";
 import { FieldsSettings, ResourcesSettings } from "./resources-fields-settings";
 
 type Branch = {
   id: string;
   name: string;
   address: string;
+  phone?: string;
   timezone: string;
   requireOpenShift: boolean;
   masterSeesAllColumns: boolean;
@@ -63,7 +65,7 @@ export function SettingsView() {
   const set = <K extends keyof Branch>(key: K, value: Branch[K]) => setBranch({ ...branch, [key]: value });
   return (
     <>
-      <div><div className="page-kicker">Филиал</div><h1>Настройки</h1></div>
+      <div><div className="page-kicker">Филиал · {branch.name}</div><h1>Настройки</h1></div>
       <form className="panel list" onSubmit={async (event) => {
         event.preventDefault();
         try {
@@ -76,6 +78,7 @@ export function SettingsView() {
       }}>
         <div className="field"><label>Название</label><input value={branch.name} onChange={(event) => set("name", event.target.value)} /></div>
         <div className="field"><label>Адрес</label><input value={branch.address} onChange={(event) => set("address", event.target.value)} /></div>
+        <div className="field"><label>Телефон филиала</label><input value={branch.phone ?? ""} placeholder="+7 …" onChange={(event) => set("phone", event.target.value)} /></div>
         <div className="field"><label>Часовой пояс</label><input value={branch.timezone} onChange={(event) => set("timezone", event.target.value)} /></div>
         <label className="row"><input type="checkbox" checked={branch.requireOpenShift} onChange={(event) => set("requireOpenShift", event.target.checked)} /> Требовать открытую смену для оплаты</label>
         <label className="row"><input type="checkbox" checked={branch.masterSeesAllColumns} onChange={(event) => set("masterSeesAllColumns", event.target.checked)} /> Мастер видит все колонки</label>
@@ -91,6 +94,7 @@ export function SettingsView() {
         <div className="field"><label>Неявка после, минут</label><input type="number" value={branch.noShowGraceMin} onChange={(event) => set("noShowGraceMin", Number(event.target.value))} /></div>
         <button className="btn-gradient" type="submit">Сохранить</button>
       </form>
+      {(role === "owner" || role === "super") && <BranchesSettings currentId={branch.id} />}
       {(role === "owner" || role === "super") && <IntegrationsSettings />}
       <FiscalSettings branch={branch} onSaved={setBranch} />
       <OnlineBookingSettings branch={branch} onSaved={setBranch} />

@@ -19,13 +19,13 @@ import type { Ctx } from "./types";
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const REPORT_ROLES = ["owner", "admin", "accountant", "super"];
 
-function days(from: string, to: string) {
+export function days(from: string, to: string) {
   const list: string[] = [];
   for (let day = from; day <= to; day = addCalendarDays(day, 1)) list.push(day);
   return list;
 }
 
-function workMinutes(intervals: { startMin: number; endMin: number; kind: "work" | "break" }[]) {
+export function workMinutes(intervals: { startMin: number; endMin: number; kind: "work" | "break" }[]) {
   const work = intervals.filter((item) => item.kind === "work").reduce((sum, item) => sum + (item.endMin - item.startMin), 0);
   const breaks = intervals.filter((item) => item.kind === "break").reduce((sum, item) => sum + (item.endMin - item.startMin), 0);
   return Math.max(0, work - breaks);
@@ -110,7 +110,7 @@ export async function getCalendar(ctx: Ctx, input: { branchId: string; from: str
 
 export type PeriodFilter = { branchId: string; from: string; to: string; staffId?: string | null; serviceId?: string | null; source?: "admin" | "online" | null };
 
-async function totals(ctx: Ctx, f: PeriodFilter, timezone: string) {
+export async function totals(ctx: Ctx, f: PeriodFilter, timezone: string) {
   const start = localDayUtcRange(f.from, timezone).start.toISOString();
   const end = localDayUtcRange(f.to, timezone).end.toISOString();
   // Money is posted payments; a staff/service/source filter keeps payments of matching visits only.

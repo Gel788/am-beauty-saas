@@ -849,3 +849,43 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .call-row.missed { color: #be123c; }
 @keyframes call-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes call-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(14deg); } 60% { transform: rotate(-8deg); } }
+/* Phase 4 · NET: branch switcher, network comparison, branch settings */
+.branch-switch { position: relative; }
+.branch-switch .salon-switch { cursor: pointer; }
+.branch-menu { background: #fff !important; backdrop-filter: none; box-shadow: 0 18px 40px rgba(80, 40, 110, 0.18); position: absolute; z-index: 40; top: calc(100% - 6px); left: 2px; right: 2px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.branch-item { display: flex; align-items: center; gap: 8px; justify-content: space-between; border: 0; background: transparent; padding: 8px 10px; border-radius: 12px; text-align: left; cursor: pointer; }
+.branch-item:hover { background: #f6f0ff; }
+.branch-item span { display: flex; flex-direction: column; min-width: 0; }
+.branch-item b { font-size: 13px; font-weight: 650; }
+.branch-item small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.branch-menu-foot { border-top: 1px solid var(--line); margin-top: 4px; padding: 6px 4px 2px; display: flex; flex-direction: column; gap: 4px; }
+.branch-menu-foot a { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #6a3fd6; padding: 4px 6px; border-radius: 8px; }
+.branch-menu-foot a:hover { background: #f6f0ff; }
+.segment.small button { padding: 5px 10px; font-size: 12px; }
+.net-rows { display: flex; flex-direction: column; gap: 8px; }
+.net-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(180px, 1.6fr) repeat(4, minmax(90px, 0.8fr)) auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 16px; background: white; box-shadow: 0 6px 16px rgba(80, 40, 110, 0.04); }
+.net-name, .net-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.net-name small, .net-metric small, .net-metric span { font-size: 11.5px; }
+.net-metric b { font-size: 15px; }
+.net-revenue { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.net-bar { height: 8px; border-radius: 999px; background: #f1ebf8; overflow: hidden; }
+.net-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #7c5cff, #ff4d8d); }
+.net-actions { display: flex; gap: 6px; }
+.load-chip { align-self: flex-start; padding: 2px 8px; border-radius: 999px; font-size: 13px !important; }
+.load-chip.hot { background: #ffe3ec; color: #b0204f; }
+.load-chip.ok { background: #e6f7ee; color: #137a45; }
+.load-chip.low { background: #fff4e0; color: #93540c; }
+.branch-list { display: flex; flex-direction: column; gap: 6px; }
+.branch-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 14px; background: white; border: 1px solid var(--line); }
+.branch-card > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.branch-card small { font-size: 12px; }
+.form-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-row .chip { cursor: pointer; }
+@media (max-width: 1100px) {
+  .net-row { grid-template-columns: 1fr 1fr; }
+  .net-revenue, .net-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .form-grid-2 { grid-template-columns: 1fr; }
+}
