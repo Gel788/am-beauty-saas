@@ -1,3 +1,5 @@
+import { authenticateApiKey, createApiKey, listApiKeys, rateLimit, revokeApiKey, runAsApi, v1Appointment, v1Appointments, v1Branches, v1CancelAppointment, v1Client, v1Clients, v1CreateAppointment, v1CreateClient, v1Services, v1Staff } from "@/server/public-api";
+import { createWebhook, deleteWebhook, listWebhooks, pingWebhook, runWebhookJob, runWebhooksForTenant } from "@/server/webhooks";
 import { pool } from "@/server/db";
 import { addFormula, addPhoto, deleteFormula, deletePhoto, getPhoto, getTechCard, updateHealth } from "@/server/techcard";
 import {
@@ -21,7 +23,7 @@ import {
   updateRetentionSettings,
 } from "@/server/retention";
 import { NextRequest, NextResponse } from "next/server";
-import { isAppError } from "@/domain/errors";
+import { AppError, isAppError } from "@/domain/errors";
 import { actorFromToken, asActor, getDensity, login, logout, register, setDensity } from "@/server/auth";
 import {
   cancelAppointment,
@@ -204,6 +206,7 @@ function fail(error: unknown) {
       NOT_FOUND: 404,
       STALE: 409,
       SOFT_CONFIRM: 409,
+      RATE_LIMITED: 429,
     }[error.code];
     return NextResponse.json({ error: { code: error.code, message: error.message, details: error.details ?? null } }, { status });
   }
@@ -296,6 +299,15 @@ async function handle(request: NextRequest, parts: string[]) {
     return NextResponse.json(await runRetentionJob());
   }
 
+  if (key === "POST jobs/webhooks") {
+    const expected = process.env.JOBS_TOKEN;
+    if (!expected || request.headers.get("x-jobs-token") !== expected) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Недостаточно прав" } }, { status: 403 });
+    }
+    return NextResponse.json(await runWebhookJob());
+  }
+  if (parts[0] === "v1") return handleV1(request, parts.slice(1));
+
   if (key === "POST jobs/fiscal") {
     const expected = process.env.JOBS_TOKEN;
     if (!expected || request.headers.get("x-jobs-token") !== expected) {
@@ -357,6 +369,20 @@ async function handle(request: NextRequest, parts: string[]) {
   const run = <T>(fn: (ctx: Parameters<Parameters<typeof asActor<T>>[1]>[0]) => Promise<T>) => asActor(actor, fn);
 
   if (key === "GET branches") return NextResponse.json(await run((ctx) => listBranches(ctx)));
+  // API-KEY-01 / API-HOOK-01: the owner's keys and webhooks.
+  if (key === "GET api-keys") return NextResponse.json(await run((ctx) => listApiKeys(ctx)));
+  if (key === "POST api-keys") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createApiKey(ctx, body)), { status: 201 });
+  }
+  if (method === "DELETE" && parts[0] === "api-keys" && parts[1]) return NextResponse.json(await run((ctx) => revokeApiKey(ctx, parts[1])));
+  if (key === "GET api-webhooks") return NextResponse.json(await run((ctx) => listWebhooks(ctx)));
+  if (key === "POST api-webhooks") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => createWebhook(ctx, body)), { status: 201 });
+  }
+  if (method === "DELETE" && parts[0] === "api-webhooks" && parts[1] && !parts[2]) return NextResponse.json(await run((ctx) => deleteWebhook(ctx, parts[1])));
+  if (method === "POST" && parts[0] === "api-webhooks" && parts[1] && parts[2] === "ping") return NextResponse.json(await run((ctx) => pingWebhook(ctx, parts[1])));
   if (key === "PATCH tenant") {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => updateTenantSlug(ctx, String(body.slug ?? ""))));
@@ -1076,6 +1102,35 @@ function clientIp(request: NextRequest) {
 }
 
 /** Online booking (OB-*): no session; the slug or the cancel token picks the tenant. */
+/** API-V1: the salon's own integrations with a key. Shapes are stable and documented in docs/api.md. */
+async function handleV1(request: NextRequest, parts: string[]) {
+  const caller = await authenticateApiKey(request.headers.get("authorization"));
+  const limit = rateLimit(caller.keyId);
+  const method = request.method;
+  const route = parts.join("/");
+  const query = request.nextUrl.searchParams;
+  if (method !== "GET" && caller.scope !== "write") throw new AppError("FORBIDDEN", "Ключ только для чтения");
+  const api = <T>(fn: Parameters<typeof runAsApi<T>>[1]) => runAsApi(caller, fn);
+  let result: unknown;
+  let status = 200;
+  if (method === "GET" && route === "branches") result = await api((ctx) => v1Branches(ctx));
+  else if (method === "GET" && route === "services") result = await api((ctx) => v1Services(ctx));
+  else if (method === "GET" && route === "staff") result = await api((ctx) => v1Staff(ctx));
+  else if (method === "GET" && route === "clients") result = await api((ctx) => v1Clients(ctx, query));
+  else if (method === "POST" && route === "clients") { const body = await readJson(request); result = await api((ctx) => v1CreateClient(ctx, body)); status = 201; }
+  else if (method === "GET" && parts[0] === "clients" && parts[1] && !parts[2]) result = await api((ctx) => v1Client(ctx, parts[1]));
+  else if (method === "GET" && route === "appointments") result = await api((ctx) => v1Appointments(ctx, query));
+  else if (method === "POST" && route === "appointments") { const body = await readJson(request); result = await api((ctx) => v1CreateAppointment(ctx, body)); status = 201; }
+  else if (method === "GET" && parts[0] === "appointments" && parts[1] && !parts[2]) result = await api((ctx) => v1Appointment(ctx, parts[1]));
+  else if (method === "POST" && parts[0] === "appointments" && parts[1] && parts[2] === "cancel") { const body = await readJson(request); result = await api((ctx) => v1CancelAppointment(ctx, parts[1], body)); }
+  else if (method === "GET" && route === "slots") {
+    const branchId = caller.branchId ?? query.get("branchId") ?? "";
+    result = await asOnline(caller.tenantId, (ctx) => listSlots(ctx, branchId, { serviceId: query.get("serviceId") ?? "", staffId: query.get("staffId") || null, from: query.get("from") ?? undefined, days: query.get("days") ? Number(query.get("days")) : undefined }));
+  } else throw new AppError("NOT_FOUND", "Нет такого метода API. Список: docs/api.md");
+  if (method !== "GET") void runWebhooksForTenant(caller.tenantId).catch((error) => console.error("webhooks", error));
+  return NextResponse.json(result, { status, headers: { "x-ratelimit-remaining": String(limit.remaining) } });
+}
+
 async function handlePublic(request: NextRequest, parts: string[]) {
   const method = request.method;
   const url = request.nextUrl;

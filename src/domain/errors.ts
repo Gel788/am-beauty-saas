@@ -7,7 +7,8 @@ export type ErrorCode =
   | "SHIFT_CLOSED"
   | "NOT_FOUND"
   | "STALE"
-  | "SOFT_CONFIRM";
+  | "SOFT_CONFIRM"
+  | "RATE_LIMITED";
 
 export class AppError extends Error {
   readonly code: ErrorCode;

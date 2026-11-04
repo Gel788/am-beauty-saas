@@ -1,4 +1,5 @@
 import type { Ctx } from "./types";
+import { enqueueWebhooks } from "./webhooks";
 
 export async function audit(
   ctx: Ctx,
@@ -24,6 +25,8 @@ export async function audit(
       JSON.stringify(entry.diff ?? {}),
     ],
   );
+  // API-HOOK-01: every audited change is also the source of outgoing webhooks.
+  await enqueueWebhooks(ctx, entry);
 }
 
 export async function listAudit(ctx: Ctx, entity: string, entityId: string) {
