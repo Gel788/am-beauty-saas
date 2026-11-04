@@ -538,6 +538,7 @@ export async function confirmBooking(
     body: `${when} · ${service.title} · ${staff.display_name}`,
     entity: "appointment",
     entityId: appointment.id,
+    staffId: hold.staff_id,
   });
   if (branch.booking_message_enabled) {
     const { values } = await appointmentValues(ctx, appointment.id, { ссылка: `${publicUrl()}/booking/${token}` });
@@ -627,6 +628,7 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
       body: `Поздно для онлайн-отмены. ${reason ? `Причина: ${reason}` : "Позвоните клиенту."}`,
       entity: "appointment",
       entityId: appointmentId,
+    staffId: booking.row.staff_id,
     });
     return { ...presentBooking(booking), outcome: "requested" as const };
   }
@@ -651,6 +653,7 @@ export async function cancelBooking(ctx: Ctx, appointmentId: string, input: { re
     body: reason ? `Причина: ${reason}` : "",
     entity: "appointment",
     entityId: appointmentId,
+    staffId: booking.row.staff_id,
   });
   // Telegram already answers in the chat; elsewhere the client gets the cancellation in writing.
   if (booking.row.client_id && booking.branch.booking_message_enabled && input.notifyClient !== false) {
@@ -684,6 +687,7 @@ export async function confirmVisit(ctx: Ctx, appointmentId: string, via: "link" 
     body: `${when} · ${booking.row.title ?? ""} · ${booking.row.staff_name}`,
     entity: "appointment",
     entityId: appointmentId,
+    staffId: booking.row.staff_id,
   });
   return { ...presentBooking(await loadBooking(ctx, appointmentId)), outcome: "confirmed" as const };
 }

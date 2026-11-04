@@ -1,4 +1,5 @@
 import { pool } from "@/server/db";
+import { pushPublicKey, pushStatus, sendTestPush, subscribePush, unsubscribePush } from "@/server/push";
 import { addFormula, addPhoto, deleteFormula, deletePhoto, getPhoto, getTechCard, updateHealth } from "@/server/techcard";
 import {
   closeWaitlistEntry,
@@ -698,6 +699,17 @@ async function handle(request: NextRequest, parts: string[]) {
     const body = await readJson(request);
     return NextResponse.json(await run((ctx) => markNotificationsRead(ctx, Array.isArray(body.ids) ? body.ids.map(String) : undefined)));
   }
+  // PWA-PUSH-01
+  if (key === "GET push") return NextResponse.json(await run(async (ctx) => ({ ...(await pushPublicKey(ctx)), ...(await pushStatus(ctx)) })));
+  if (key === "POST push/subscribe") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => subscribePush(ctx, { subscription: body.subscription, userAgent: request.headers.get("user-agent") ?? "" })));
+  }
+  if (key === "POST push/unsubscribe") {
+    const body = await readJson(request);
+    return NextResponse.json(await run((ctx) => unsubscribePush(ctx, typeof body.endpoint === "string" ? body.endpoint : undefined)));
+  }
+  if (key === "POST push/test") return NextResponse.json(await run((ctx) => sendTestPush(ctx)));
   if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
   if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {
     const body = await readJson(request);
