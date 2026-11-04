@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command install or update of AM Beauty CRM on a fresh Ubuntu/Debian server.
 #   curl -fsSL https://raw.githubusercontent.com/Gel788/am-beauty-saas/staging/deploy/install.sh | sudo bash
-# Options (env): BRANCH=staging  DIR=/opt/am-beauty-saas  DOMAIN=<your domain>  ADMIN_EMAIL=<platform owner>  SEED=1|0  RESET_DB=1 (drop a leftover database)
+# Options (env): BRANCH=staging  DIR=/opt/am-beauty-saas  DOMAIN=<your domain>  ADMIN_EMAIL=<platform owner>  SEED=1|0  RESET_DB=1 (drop a leftover database; by default it is kept and its password realigned)
 # Without DOMAIN the server gets a free name <ip>.sslip.io with a real HTTPS certificate.
 set -euo pipefail
 
@@ -40,21 +40,15 @@ fi
 
 ENV=deploy/.env
 IP="$(curl -fsS4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
-NEW_ENV=0
-[ -f "$ENV" ] || { cp deploy/.env.example "$ENV"; FRESH=1; NEW_ENV=1; }
-# A database volume left from an earlier install keeps its old passwords; new ones from a fresh .env would not open it.
+[ -f "$ENV" ] || { cp deploy/.env.example "$ENV"; FRESH=1; }
+# A database volume left from an earlier install keeps its old postgres password. RESET_DB=1 drops it;
+# otherwise the data stays and the password is set to the one in .env (below, once postgres is up).
 OLD_VOLUME="$(docker volume ls -q | grep -E '(^|_)pgdata$' | head -1 || true)"
-if [ "$NEW_ENV" = 1 ] && [ -n "$OLD_VOLUME" ]; then
-  if [ "${RESET_DB:-0}" = 1 ]; then
-    say "Removing the old database volume $OLD_VOLUME (RESET_DB=1)"
-    docker ps -aq --filter volume="$OLD_VOLUME" | xargs -r docker rm -f >/dev/null
-    docker volume rm "$OLD_VOLUME" >/dev/null
-  else
-    rm -f "$ENV"
-    echo "An old database volume ($OLD_VOLUME) is still on this server, but its passwords are gone."
-    echo "To start with an empty database run again with RESET_DB=1 (this deletes the old data)."
-    exit 1
-  fi
+if [ -n "$OLD_VOLUME" ] && [ "${RESET_DB:-0}" = 1 ]; then
+  say "Removing the old database volume $OLD_VOLUME (RESET_DB=1)"
+  docker ps -aq --filter volume="$OLD_VOLUME" | xargs -r docker rm -f >/dev/null
+  docker volume rm "$OLD_VOLUME" >/dev/null
+  OLD_VOLUME=""
 fi
 set_env() { # key value: set only when empty or a placeholder
   local cur; cur="$(grep -E "^$1=" "$ENV" | head -1 | cut -d= -f2- || true)"
@@ -87,7 +81,12 @@ C="docker compose -f deploy/docker-compose.prod.yml --env-file $ENV"
 say "Build (a few minutes the first time)"
 $C build
 say "Database"
-$C up -d postgres
+$C up -d --wait postgres
+if [ -n "$OLD_VOLUME" ]; then
+  # Inside the container the socket trusts postgres, so the password can be aligned with .env without the old one.
+  PGPASS="$(grep -E '^POSTGRES_PASSWORD=' "$ENV" | cut -d= -f2-)"
+  $C exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER USER postgres PASSWORD '$PGPASS'" >/dev/null
+fi
 $C run --rm migrate
 SEED="${SEED:-$FRESH}"
 if [ "$SEED" = 1 ]; then
