@@ -25,6 +25,7 @@ export type BranchRow = {
   tenant_id: string;
   name: string;
   address: string;
+  phone?: string;
   timezone: string;
   currency: string;
   require_open_shift: boolean;

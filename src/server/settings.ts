@@ -5,10 +5,18 @@ import type { BranchRow, Ctx } from "./types";
 import { fiscalProviders } from "./fiscal";
 import { acquiringProviders } from "./acquiring";
 
+export function assertTimezone(zone: string) {
+  try {
+    new Intl.DateTimeFormat("ru-RU", { timeZone: zone });
+  } catch {
+    throw new AppError("VALIDATION", "Неизвестный часовой пояс");
+  }
+}
+
 export async function listBranches(ctx: Ctx) {
   const rows = await many<BranchRow>(
     ctx.db,
-    "SELECT b.*, t.slug AS tenant_slug FROM branches b JOIN tenants t ON t.id = b.tenant_id ORDER BY b.created_at",
+    "SELECT b.*, t.slug AS tenant_slug FROM branches b JOIN tenants t ON t.id = b.tenant_id ORDER BY b.created_at, b.id",
   );
   return rows
     .filter((branch) => !ctx.actor.branchId || ctx.actor.branchId === branch.id || ctx.actor.role === "owner" || ctx.actor.role === "super")
@@ -20,6 +28,7 @@ export function presentBranch(branch: BranchRow) {
     id: branch.id,
     name: branch.name,
     address: branch.address,
+    phone: branch.phone ?? "",
     timezone: branch.timezone,
     currency: branch.currency,
     requireOpenShift: branch.require_open_shift,
@@ -92,6 +101,7 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
   const map: Record<string, string> = {
     name: "name",
     address: "address",
+    phone: "phone",
     timezone: "timezone",
     requireOpenShift: "require_open_shift",
     masterSeesAllColumns: "master_sees_all_columns",
@@ -181,6 +191,9 @@ export async function updateBranch(ctx: Ctx, id: string, input: Record<string, u
     throw new AppError("VALIDATION", "Политика списания: предупреждать или запрещать");
   }
   if (input.slug !== undefined) input.slug = String(input.slug).trim().toLowerCase();
+  if (input.phone !== undefined) input.phone = String(input.phone).trim().slice(0, 32);
+  if (input.name !== undefined && !String(input.name).trim()) throw new AppError("VALIDATION", "Укажите название филиала");
+  if (input.timezone !== undefined) assertTimezone(String(input.timezone));
   const sets: string[] = [];
   const values: unknown[] = [];
   for (const [key, column] of Object.entries(map)) {
