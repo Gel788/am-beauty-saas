@@ -58,6 +58,7 @@ type Item = {
   run: () => void | Promise<void>;
 };
 
+const AUTO_MS = 1600;
 const EXAMPLES = ["запиши Анну к Алине завтра в 15 маникюр", "склад", "журнал на пятницу", "Марина", "зарплаты"];
 const WARNINGS: Record<string, string> = {
   OUTSIDE_HOURS: "это время вне графика мастера",
@@ -81,10 +82,13 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const [text, setText] = useState("");
   const preset = useRef("");
   const listenOnOpen = useRef(false);
+  const [voiceArmed, setVoiceArmed] = useState(false);
   // VOICE-01: dictate the same phrase you would type.
   const voice = useVoice((spoken, final) => {
     setText(spokenToDigits(spoken));
     setWarnings(null);
+    // VOICE-02: a finished phrase arms auto-run, so the command happens without a key press.
+    setVoiceArmed(final);
     if (final) setTimeout(() => inputRef.current?.focus(), 0);
   });
   const [active, setActive] = useState(0);
@@ -418,6 +422,32 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     return out;
   }, [text, parsed, desk, branch, today, timezone, warnings, services, branchStaff, clients, go, book, free, slotTaken, duration, day, nowMin, ahead]);
 
+  // VOICE-02: what a spoken phrase runs by itself once everything it needs has loaded.
+  const autoItem = (() => {
+    if (!voiceArmed || busy || warnings || voice.listening) return null;
+    const first = items[0];
+    if (!first) return null;
+    if (first.key === "book") {
+      const complete = parsed.staff && parsed.date && parsed.time !== null && parsed.services.length && free !== null && !slotTaken;
+      return complete ? first : null;
+    }
+    return first.key === "day" || first.key.startsWith("page-") || first.key.startsWith("client-") || first.key.startsWith("staff-") ? first : null;
+  })();
+  const autoSign = autoItem ? `${autoItem.key}|${autoItem.title}|${autoItem.hint ?? ""}` : "";
+  const autoRef = useRef(autoItem);
+  autoRef.current = autoItem;
+  useEffect(() => {
+    if (!autoSign) return;
+    const timer = setTimeout(() => {
+      setVoiceArmed(false);
+      void autoRef.current?.run();
+    }, AUTO_MS);
+    return () => clearTimeout(timer);
+  }, [autoSign]);
+  useEffect(() => {
+    if (!open) setVoiceArmed(false);
+  }, [open]);
+
   useEffect(() => setActive(0), [text]);
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -428,6 +458,11 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const current = Math.min(active, Math.max(items.length - 1, 0));
 
   const onKey = (event: React.KeyboardEvent) => {
+    if (autoItem && event.key !== "Enter") {
+      // Any key stops the voice auto-run; Esc only cancels it and keeps the bar open.
+      setVoiceArmed(false);
+      if (event.key === "Escape") return;
+    }
     if (event.key === "Escape") close();
     else if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -453,6 +488,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
               onChange={(event) => {
                 setText(event.target.value);
                 setWarnings(null);
+                setVoiceArmed(false);
               }}
               placeholder={voice.listening ? "Говорите…" : "Найти или сделать… «запиши Анну к Алине завтра в 15»"}
               aria-label="Что сделать"
@@ -509,14 +545,21 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                     {item.hint && <small>{item.hint}</small>}
                   </span>
                   {index === current && <CornerDownLeft className="cmd-enter" size={16} />}
+                  {item === autoItem && <span key={autoSign} className="cmd-auto-bar" style={{ animationDuration: `${AUTO_MS}ms` }} aria-hidden />}
                 </button>
               );
             })}
           </div>
           <div className="cmd-foot">
+            {autoItem ? (
+              <span className="cmd-auto-note">Понял команду, выполняю… <kbd>esc</kbd> отмена</span>
+            ) : (
+              <>
             <span><kbd>↑</kbd><kbd>↓</kbd> выбрать</span>
             <span><kbd>↵</kbd> выполнить</span>
             <span><kbd>⌘</kbd><kbd>K</kbd> открыть с любого экрана</span>
+              </>
+            )}
           </div>
         </div>
       </div>
