@@ -190,8 +190,9 @@ import { handleTelegramUpdate, ownBotFor, telegramSecretOk } from "@/server/tele
 import { deleteResource, listResources, resourceOptions, saveResource } from "@/server/resources";
 import { listFields, saveField } from "@/server/custom-fields";
 import { cancelEvent, completeEvent, enroll, enrollOnline, getEvent, groupStats, listEvents, markArrived, paySeat, saveEvent, setParticipantStatus } from "@/server/groups";
-import { checkIntegration, deleteIntegration, integrationConfig, listIntegrations, saveIntegration } from "@/server/integrations";
-import { speechkitSynthesize } from "@/server/providers/speechkit";
+import { activeIntegration, checkIntegration, deleteIntegration, listIntegrations, saveIntegration } from "@/server/integrations";
+import { synthesize } from "@/server/providers/tts";
+import { askAssistant, assistantAvailable } from "@/server/assistant";
 import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
 import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
 import { getCalendar, masterDay, periodReport, periodReportCsv } from "@/server/period";
@@ -832,14 +833,19 @@ async function handle(request: NextRequest, parts: string[]) {
   if (parts[0] === "clients" && parts[1] && parts[2] === "calls" && !parts[3] && method === "GET") return NextResponse.json(await run((ctx) => clientCalls(ctx, parts[1])));
   if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
   // VOICE-PRO-01: the live voice. GET says whether the salon has it, POST turns a phrase into mp3.
-  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean(await integrationConfig(ctx, "yandex_speechkit")) })));
+  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean(await activeIntegration(ctx, "voice")), assistant: await assistantAvailable(ctx) })));
+  if (key === "POST voice/ask") {
+    const body = await readJson(request);
+    const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
+    return NextResponse.json(await run((ctx) => askAssistant(ctx, branchId, String(body.question ?? ""), Array.isArray(body.history) ? (body.history as { role: "user" | "assistant"; content: string }[]).filter((row) => (row.role === "user" || row.role === "assistant") && typeof row.content === "string") : [])));
+  }
   if (key === "POST voice/tts") {
     const body = await readJson(request);
     const text = String(body.text ?? "").trim().slice(0, 600);
     if (!text) return NextResponse.json({ error: { code: "VALIDATION", message: "Пустая фраза" } }, { status: 400 });
-    const config = await run((ctx) => integrationConfig(ctx, "yandex_speechkit"));
-    if (!config) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Голос не подключён" } }, { status: 404 });
-    const audio = await speechkitSynthesize(config, text);
+    const voice = await run((ctx) => activeIntegration(ctx, "voice"));
+    if (!voice) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Голос не подключён" } }, { status: 404 });
+    const audio = await synthesize(voice.provider, voice.config, text);
     return new NextResponse(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
   }
   if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {

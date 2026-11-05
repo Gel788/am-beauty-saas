@@ -1266,3 +1266,13 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .cmd-pill-mic { position: relative; }
 .cmd-pill-mic.wake::after { content: ""; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #2fbf71; box-shadow: 0 0 0 0 rgba(47, 191, 113, .6); animation: wake-dot 2s infinite; }
 @keyframes wake-dot { 0% { box-shadow: 0 0 0 0 rgba(47, 191, 113, .55); } 70% { box-shadow: 0 0 0 7px rgba(47, 191, 113, 0); } 100% { box-shadow: 0 0 0 0 rgba(47, 191, 113, 0); } }
+
+/* VOICE-PRO-03: the assistant's answer in the command bar. */
+.cmd-answer { display: flex; gap: 12px; align-items: flex-start; margin: 6px 4px 10px; padding: 14px 16px; border-radius: 16px; background: linear-gradient(135deg, #f6f1ff, #fdf0f7); color: #2a2340; }
+.cmd-answer > svg { flex: none; color: #7c5cff; margin-top: 2px; }
+.cmd-answer p { margin: 0; font-size: 15px; line-height: 1.45; }
+.cmd-answer.thinking p { color: #7c5cff; animation: cmd-think 1.2s ease-in-out infinite; }
+@keyframes cmd-think { 50% { opacity: .45; } }
+.cmd-answer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cmd-answer-btn { position: relative; overflow: hidden; border: 0; border-radius: 12px; padding: 8px 14px; background: #7c5cff; color: #fff; font-weight: 600; cursor: pointer; }
+.cmd-answer-btn .cmd-auto-bar { background: rgba(255, 255, 255, .7); }

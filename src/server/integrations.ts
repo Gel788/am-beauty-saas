@@ -10,7 +10,7 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
-import { SPEECHKIT_VOICES, speechkitCheck } from "./providers/speechkit";
+import { elevenCheck, OPENAI_VOICES, openaiCheck } from "./providers/tts";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
@@ -179,18 +179,33 @@ export const INTEGRATIONS: Definition[] = [
     },
   },
   {
-    provider: "yandex_speechkit",
+    provider: "openai_voice",
     kind: "voice",
-    label: "Яндекс SpeechKit",
-    about: "Живой голос CRM вместо робота браузера: ответы на голосовые команды звучат голосом Алёны, Филиппа или другого диктора. В Яндекс Облаке создайте сервисный аккаунт с ролью ai.speechkit-tts.user, выпустите для него API-ключ и скопируйте ID каталога.",
-    docsUrl: "https://yandex.cloud/ru/docs/speechkit/concepts/auth",
+    label: "OpenAI или совместимый провайдер",
+    about: "Ассистент, который понимает любые вопросы и просьбы («кто у Марины после обеда?», «отметь, что Ольга пришла»), и живой голос ответов. Подойдёт ключ OpenAI или любого провайдера с OpenAI-совместимым API: укажите его адрес и модель.",
+    docsUrl: "https://platform.openai.com/api-keys",
     exclusive: true,
     fields: [
-      { key: "apiKey", label: "API-ключ сервисного аккаунта", secret: true, required: true, placeholder: "AQVN…" },
-      { key: "folderId", label: "ID каталога", required: true, placeholder: "b1g…" },
-      { key: "voice", label: "Голос", options: SPEECHKIT_VOICES },
+      { key: "apiKey", label: "API-ключ", secret: true, required: true, placeholder: "sk-…" },
+      { key: "voice", label: "Голос", options: OPENAI_VOICES },
+      { key: "ttsModel", label: "Модель озвучки", placeholder: "gpt-4o-mini-tts", hint: "Пусто — gpt-4o-mini-tts. Если у провайдера нет озвучки, CRM говорит голосом браузера" },
+      { key: "baseUrl", label: "Адрес API провайдера", placeholder: "https://api.openai.com/v1", hint: "Для провайдера или прокси: его адрес, совместимый с OpenAI. Пусто — напрямую в OpenAI" },
+      { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Имя модели, как его пишет провайдер, с поддержкой инструментов (tools). Пусто — gpt-5-mini" },
     ],
-    check: (config) => speechkitCheck(config),
+    check: (config) => openaiCheck(config),
+  },
+  {
+    provider: "elevenlabs",
+    kind: "voice",
+    label: "ElevenLabs",
+    about: "Самый живой голос. Ключ — elevenlabs.io → Profile → API Keys. Голос можно выбрать в библиотеке ElevenLabs и вставить его Voice ID.",
+    docsUrl: "https://elevenlabs.io/app/settings/api-keys",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ", secret: true, required: true },
+      { key: "voiceId", label: "Voice ID", placeholder: "EXAVITQu4vr4xnSDxMaL", hint: "Пусто — голос Sarah, хорошо говорит по-русски" },
+    ],
+    check: (config) => elevenCheck(config),
   },
 ];
 const BY_NAME = new Map(INTEGRATIONS.map((item) => [item.provider, item]));
