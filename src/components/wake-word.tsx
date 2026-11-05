@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { spokenToDigits } from "@/domain/command";
+import { matchWake } from "@/domain/wake";
 
 const WAKE_KEY = "am-wake-word";
-const WAKE = /(?:^|\s)(?:ассистент|асистент|ассистентка)[,.!]?\s*/i;
+const NAME_KEY = "am-wake-name";
 
 type Rec = {
   lang: string;
@@ -23,6 +24,14 @@ function recClass(): (new () => Rec) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+export function wakeName() {
+  try {
+    return window.localStorage.getItem(NAME_KEY) || "Ассистент";
+  } catch {
+    return "Ассистент";
+  }
+}
+
 function stored() {
   try {
     return window.localStorage.getItem(WAKE_KEY) === "on";
@@ -34,9 +43,14 @@ function stored() {
 /** The switch for «Ассистент…», shared by every place that shows it. */
 export function useWakeSwitch() {
   const [on, setOn] = useState(false);
+  const [name, setNameState] = useState("Ассистент");
   useEffect(() => {
     setOn(stored());
-    const sync = () => setOn(stored());
+    setNameState(wakeName());
+    const sync = () => {
+      setOn(stored());
+      setNameState(wakeName());
+    };
     window.addEventListener("wake-word-changed", sync);
     return () => window.removeEventListener("wake-word-changed", sync);
   }, []);
@@ -49,7 +63,15 @@ export function useWakeSwitch() {
     }
     window.dispatchEvent(new Event("wake-word-changed"));
   }, []);
-  return { on, toggle, supported: typeof window !== "undefined" && Boolean(recClass()) };
+  const setName = useCallback((value: string) => {
+    try {
+      window.localStorage.setItem(NAME_KEY, value.trim().slice(0, 30) || "Ассистент");
+    } catch {
+      // ignore
+    }
+    window.dispatchEvent(new Event("wake-word-changed"));
+  }, []);
+  return { on, toggle, name, setName, supported: typeof window !== "undefined" && Boolean(recClass()) };
 }
 
 /**
@@ -86,10 +108,8 @@ export function WakeWordListener() {
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
           const result = event.results[i];
           if (!result.isFinal) continue;
-          const said = result[0].transcript;
-          const match = WAKE.exec(said);
-          if (!match) continue;
-          const rest = said.slice(match.index + match[0].length).trim();
+          const rest = matchWake(result[0].transcript, wakeName());
+          if (rest === null) continue;
           alive = false;
           rec?.abort();
           window.dispatchEvent(new CustomEvent("open-command-bar", { detail: rest.length > 2 ? { text: spokenToDigits(rest), auto: true } : { voice: true } }));

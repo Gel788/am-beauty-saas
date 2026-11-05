@@ -1276,3 +1276,7 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .cmd-answer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .cmd-answer-btn { position: relative; overflow: hidden; border: 0; border-radius: 12px; padding: 8px 14px; background: #7c5cff; color: #fff; font-weight: 600; cursor: pointer; }
 .cmd-answer-btn .cmd-auto-bar { background: rgba(255, 255, 255, .7); }
+.cmd-wake { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; color: #6f6888; font-size: 13px; }
+.cmd-wake-switch { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 10px; padding: 6px 10px; background: #f3eefc; color: #7c5cff; font-weight: 600; cursor: pointer; }
+.cmd-wake-switch.on { background: #2fbf71; color: #fff; }
+.cmd-wake-name { width: 110px; border: 1px solid #e4dcf7; border-radius: 8px; padding: 4px 8px; font: inherit; color: #2a2340; background: #fff; }
