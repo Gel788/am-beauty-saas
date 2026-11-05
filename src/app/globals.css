@@ -1151,3 +1151,32 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
   .sidebar.collapsed .branch-menu { right: auto; width: 260px; }
 }
 @media (max-width: 980px) { .side-toggle { display: none; } }
+
+/* PULSE-01: «Пульт дня» next to the journal */
+.pulse-sum { padding: 12px; border-radius: 18px; background: linear-gradient(135deg, rgba(124, 92, 255, 0.1), rgba(255, 77, 141, 0.08)); display: flex; flex-direction: column; gap: 8px; }
+.pulse-sum b { font-family: var(--font-unbounded); font-weight: 560; letter-spacing: -0.03em; }
+.pulse-sum > div:first-child b { display: block; font-size: 22px; line-height: 1.1; }
+.pulse-sum > div:first-child span { font-size: 12px; color: var(--muted); }
+.pulse-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.8); overflow: hidden; }
+.pulse-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7c5cff, #ff4d8d); transition: width .4s ease; }
+.pulse-facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 11px; color: var(--muted); }
+.pulse-facts span { display: flex; flex-direction: column; }
+.pulse-facts b { font-size: 15px; color: var(--ink); }
+.pulse-calm { display: flex; gap: 8px; align-items: center; padding: 12px; border-radius: 16px; background: rgba(34, 160, 107, 0.08); color: #17845a; font-size: 13px; }
+.pulse-card { padding: 11px 12px; border-radius: 16px; background: #fff; box-shadow: 0 6px 18px rgba(110, 60, 150, 0.06); border-left: 3px solid #c9b8f5; display: flex; flex-direction: column; gap: 6px; animation: pulse-in .25s ease-out; }
+.pulse-card.urgent { border-left-color: #f43f5e; }
+.pulse-card.money { border-left-color: #f59e0b; }
+.pulse-card.chance { border-left-color: #22a06b; }
+.pulse-title { display: flex; align-items: flex-start; gap: 8px; }
+.pulse-title strong { font-size: 13.5px; line-height: 1.3; }
+.pulse-ico { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; flex: none; background: #f3eefc; color: #7c5cff; }
+.pulse-card.urgent .pulse-ico { background: #fff1f2; color: #e11d48; }
+.pulse-card.money .pulse-ico { background: #fff7e6; color: #b45309; }
+.pulse-card.chance .pulse-ico { background: #e9f8f1; color: #17845a; }
+.pulse-card p { margin: 0 0 0 32px; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.pulse-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 32px; }
+.pulse-btn { border: 1px solid rgba(90, 50, 120, 0.14); background: #fff; border-radius: 10px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; color: #4b3a63; cursor: pointer; }
+.pulse-btn.main { border-color: transparent; background: #1c1428; color: #fff; }
+.pulse-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.pulse-btn:disabled { opacity: .5; cursor: default; }
+@keyframes pulse-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

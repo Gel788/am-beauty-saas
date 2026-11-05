@@ -31,7 +31,7 @@ const LINKS: { href: string; label: string; icon: typeof CalendarDays; badge?: s
   { href: "/network", label: "Сеть салонов", icon: Network, roles: ["owner", "super"], multi: true },
   { href: "/clients", label: "Клиенты", icon: Users, roles: [...DESK, "master"] },
   { href: "/groups", label: "Группы", icon: UsersRound, roles: [...DESK, "master"] },
-  { href: "/journal#ai-panel", label: "AI-ассистент", icon: Sparkles, badge: "3", roles: DESK },
+  { href: "/journal#ai-panel", label: "Пульт дня", icon: Sparkles, roles: DESK },
   { href: "/services", label: "Услуги", icon: Scissors, roles: DESK },
   { href: "/staff", label: "Мастера", icon: UserRound, roles: [...DESK, "master"], masterLabel: "Мой график" },
   { href: "/cash", label: "Финансы", icon: Wallet, roles: [...DESK, "accountant"] },
@@ -104,7 +104,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {LINKS.filter((link) => (!me || link.roles.includes(me.actor.role)) && (!link.multi || (me?.branches.length ?? 0) > 1)).map((link) => {
               const Icon = link.icon;
               const label = me?.actor.role === "master" && link.masterLabel ? link.masterLabel : link.label;
-              const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && link.href !== "/settings" && pathname.startsWith(link.href));
+              const active = link.label === "Пульт дня" ? false : pathname === link.href || (link.href !== "/journal" && link.href !== "/settings" && pathname.startsWith(link.href));
               const calendarActive = link.href === "/journal" && pathname.startsWith("/journal") && link.label === "Календарь";
               return (
                 <Link key={link.label} href={link.href} title={collapsed ? label : undefined} className={`nav-item ${active || calendarActive ? "active" : ""}`}>
@@ -147,7 +147,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       {me && <CommandBar branches={me.branches} role={me.actor.role} />}
-      {showAi && <AiPanel />}
+      {showAi && (
+        <Suspense fallback={null}>
+          <AiPanel />
+        </Suspense>
+      )}
       {me && DESK.includes(me.actor.role) && <CallPopup />}
     </div>
   );
