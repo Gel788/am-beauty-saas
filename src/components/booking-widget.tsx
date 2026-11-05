@@ -118,6 +118,11 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
           setService(chosen);
           const staff = query.get("staff");
           if (staff && chosen.staffIds.includes(staff)) setStaffId(staff);
+          const day = query.get("date") ?? "";
+          if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day > today && day <= addDays(today, data.branch.maxAdvanceDays)) {
+            setDate(day);
+            if (day >= addDays(today, PAGE_DAYS)) setFrom(day);
+          }
           setStep(2);
         }
       })
