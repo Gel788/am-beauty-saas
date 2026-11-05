@@ -97,8 +97,9 @@ export function buildPulse(input: {
   const live = today.appointments.filter((row) => LIVE.has(row.status));
   const cards: PulseCard[] = [];
 
-  // 1. Late: should have started 10+ minutes ago and nobody marked them.
-  for (const row of live.filter((item) => WAITING.has(item.status) && item.startMin <= nowMin - 10 && item.endMin > nowMin - 60)) {
+  // 1. Late: should have started 10–45 minutes ago and nobody marked them (the two latest).
+  const late = live.filter((item) => WAITING.has(item.status) && item.startMin <= nowMin - 10 && item.startMin > nowMin - 45).sort((x, y) => y.startMin - x.startMin);
+  for (const row of late.slice(0, 2)) {
     cards.push({
       key: `late-${row.id}`,
       tone: "urgent",
@@ -108,6 +109,21 @@ export function buildPulse(input: {
         { kind: "status", appointmentId: row.id, version: row.version, status: "arrived", label: "Пришёл" },
         { kind: "status", appointmentId: row.id, version: row.version, status: "no_show", label: "Неявка" },
         { kind: "open", appointmentId: row.id, label: "Открыть" },
+      ],
+    });
+  }
+
+  // 1b. Older visits nobody marked: one card, not a wall of them.
+  const unmarked = live.filter((item) => WAITING.has(item.status) && (item.startMin <= nowMin - 45 || late.indexOf(item) >= 2)).sort((x, y) => x.startMin - y.startMin);
+  if (unmarked.length) {
+    cards.push({
+      key: "unmarked",
+      tone: "urgent",
+      title: `Не отмечено ${unmarked.length} ${unmarked.length === 1 ? "прошедший визит" : unmarked.length < 5 ? "прошедших визита" : "прошедших визитов"}`,
+      hint: unmarked.slice(0, 3).map((row) => `${hhmm(row.startMin)} ${firstName(who(row))}`).join(" · ") + (unmarked.length > 3 ? " …" : "") + ". Пришли или неявка?",
+      actions: [
+        { kind: "status", appointmentId: unmarked[0].id, version: unmarked[0].version, status: "arrived", label: `${firstName(who(unmarked[0]))} пришёл` },
+        { kind: "open", appointmentId: unmarked[0].id, label: "Открыть" },
       ],
     });
   }
