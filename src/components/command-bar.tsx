@@ -104,7 +104,12 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
         setOpen(true);
       }
     };
-    const onOpen = () => setOpen(true);
+    // PULSE-01: «Записать к …» from the day panel opens the bar with the phrase started.
+    const onOpen = (event: Event) => {
+      const preset = (event as CustomEvent<{ text?: string } | undefined>).detail?.text;
+      if (preset) setText(preset);
+      setOpen(true);
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("open-command-bar", onOpen);
     return () => {

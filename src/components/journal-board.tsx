@@ -87,6 +87,13 @@ export function JournalBoard() {
   const [date, setDate] = useState(params.get("date") ?? "");
   const [showOff, setShowOff] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
+  // PULSE-01: the day panel changed a visit: fetch the day again.
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    const bump = () => setRefresh((value) => value + 1);
+    window.addEventListener("journal-changed", bump);
+    return () => window.removeEventListener("journal-changed", bump);
+  }, []);
   const [seed, setSeed] = useState<DrawerSeed | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [view, setView] = useState<"day" | "week" | "month">("day");
@@ -145,7 +152,7 @@ export function JournalBoard() {
         if (err.name !== "AbortError") setError(err.message);
       })
       .finally(() => setLoading(false));
-  }, [branchId, date, showOff, showCancelled]);
+  }, [branchId, date, showOff, showCancelled, refresh]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
