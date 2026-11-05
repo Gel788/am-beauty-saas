@@ -78,6 +78,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const preset = useRef("");
   const [active, setActive] = useState(0);
   const [staff, setStaff] = useState<StaffDto[]>([]);
   const [services, setServices] = useState<ServiceDto[]>([]);
@@ -106,8 +107,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     };
     // PULSE-01: «Записать к …» from the day panel opens the bar with the phrase started.
     const onOpen = (event: Event) => {
-      const preset = (event as CustomEvent<{ text?: string } | undefined>).detail?.text;
-      if (preset) setText(preset);
+      const text = (event as CustomEvent<{ text?: string } | undefined>).detail?.text;
+      preset.current = text ?? "";
       setOpen(true);
     };
     window.addEventListener("keydown", onKey);
@@ -120,7 +121,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
 
   useEffect(() => {
     if (!open) return;
-    setText("");
+    setText(preset.current);
+    preset.current = "";
     setActive(0);
     setWarnings(null);
     setTimeout(() => inputRef.current?.focus(), 10);
