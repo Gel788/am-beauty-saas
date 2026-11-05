@@ -14,6 +14,8 @@ export const OPENAI_VOICES = [
   { value: "echo", label: "Echo (мужской)" },
 ];
 
+export const REG_AI_URL = "https://ai.reg.cloud/v1";
+
 const STYLE = "Говори по-русски, тепло и естественно, как вежливый администратор салона красоты. Без пауз в начале.";
 
 function openaiBase(config: Config) {
@@ -86,5 +88,6 @@ export function elevenSpeech(config: Config, text: string) {
 
 /** The phrase as mp3 from whichever voice the salon switched on. */
 export function synthesize(provider: string, config: Config, text: string) {
-  return provider === "elevenlabs" ? elevenSpeech(config, text) : openaiSpeech(config, text);
+  if (provider === "elevenlabs") return elevenSpeech(config, text);
+  return openaiSpeech(provider === "reg_ai" ? { ...config, baseUrl: REG_AI_URL } : config, text);
 }
