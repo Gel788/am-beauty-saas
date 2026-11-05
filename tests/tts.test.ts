@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setProviderHttp } from "@/server/providers/http";
-import { elevenCheck, openaiCheck } from "@/server/providers/tts";
+import { elevenCheck, localCheck, openaiCheck } from "@/server/providers/tts";
 
 describe("VOICE-PRO-01 voice keys", () => {
   afterEach(() => setProviderHttp(null));
@@ -50,5 +50,23 @@ describe("VOICE-PRO-04 SaluteSpeech", () => {
     setProviderHttp(async () => ({ ok: false, status: 401, text: async () => "{}" }));
     const { sberCheck } = await import("@/server/providers/tts");
     expect((await sberCheck({ authKey: "bad" })).text).toMatch(/не принял/);
+  });
+
+  it("VOICE-LOCAL-01: checks our own server voice", async () => {
+    const before = process.env.TTS_URL;
+    delete process.env.TTS_URL;
+    expect((await localCheck()).text).toMatch(/не установлен/);
+    process.env.TTS_URL = "http://tts:5002/";
+    let seen = "";
+    setProviderHttp(async (url) => {
+      seen = String(url);
+      return { ok: true, status: 200, text: async () => '{"voices":["denis","irina"]}' };
+    });
+    expect(await localCheck()).toEqual({ ok: true, text: "Свой голос на связи: 2 голоса" });
+    expect(seen).toBe("http://tts:5002/");
+    setProviderHttp(async () => ({ ok: false, status: 503, text: async () => '{"voices":[]}' }));
+    expect((await localCheck()).ok).toBe(false);
+    if (before === undefined) delete process.env.TTS_URL;
+    else process.env.TTS_URL = before;
   });
 });

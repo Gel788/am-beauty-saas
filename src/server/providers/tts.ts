@@ -2,6 +2,7 @@
  * VOICE-PRO-01: a live voice for the CRM's spoken answers with the salon's own key:
  * OpenAI (gpt-4o-mini-tts) or ElevenLabs. The key stays on the server; the browser only gets mp3.
  * Both refuse Russian IPs, so the OpenAI one takes an optional proxy address.
+ * VOICE-LOCAL-01: and our own Piper voice on the CRM server, which works with no key at all.
  */
 import { request, type CheckResult, type Config } from "./http";
 
@@ -133,8 +134,41 @@ export async function sberSpeech(config: Config, text: string) {
   );
 }
 
+/** VOICE-LOCAL-01: our own voice (Piper) running next to the CRM. No key, nothing leaves the server. */
+export const LOCAL_VOICES = [
+  { value: "irina", label: "Ирина (женский)" },
+  { value: "denis", label: "Денис (мужской)" },
+  { value: "dmitri", label: "Дмитрий (мужской)" },
+  { value: "ruslan", label: "Руслан (мужской)" },
+];
+
+export function localVoiceUrl() {
+  return (process.env.TTS_URL ?? "").replace(/\/$/, "");
+}
+
+export async function localCheck(): Promise<CheckResult> {
+  const base = localVoiceUrl();
+  if (!base) return { ok: false, text: "Свой голос не установлен на этом сервере: обновите сервер (install.sh)" };
+  try {
+    const { ok, data } = await request<{ voices?: string[] }>(`${base}/`, { timeoutMs: 5000 });
+    if (ok && data?.voices?.length) return { ok: true, text: `Свой голос на связи: ${data.voices.length} голоса` };
+    return { ok: false, text: "Голоса ещё не скачались: обновите сервер (install.sh)" };
+  } catch {
+    return { ok: false, text: "Свой голос не отвечает: он запускается вместе с сервером, подождите минуту" };
+  }
+}
+
+export function localSpeech(config: Config, text: string) {
+  return audio(
+    `${localVoiceUrl()}/synthesize`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: text.slice(0, 1000), voice: config.voice || "irina", speed: 0.95 }) },
+    "Свой голос",
+  );
+}
+
 /** The phrase as audio from whichever voice the salon switched on. */
 export function synthesize(provider: string, config: Config, text: string) {
+  if (provider === "local_voice") return localSpeech(config, text);
   if (provider === "elevenlabs") return elevenSpeech(config, text);
   if (provider === "salute_speech") return sberSpeech(config, text);
   return openaiSpeech(provider === "reg_ai" ? { ...config, baseUrl: REG_AI_URL } : config, text);

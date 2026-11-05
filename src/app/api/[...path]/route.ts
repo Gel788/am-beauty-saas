@@ -184,7 +184,7 @@ import { deleteResource, listResources, resourceOptions, saveResource } from "@/
 import { listFields, saveField } from "@/server/custom-fields";
 import { cancelEvent, completeEvent, enroll, enrollOnline, getEvent, groupStats, listEvents, markArrived, paySeat, saveEvent, setParticipantStatus } from "@/server/groups";
 import { activeIntegration, checkIntegration, deleteIntegration, listIntegrations, saveIntegration } from "@/server/integrations";
-import { synthesize } from "@/server/providers/tts";
+import { localVoiceUrl, synthesize } from "@/server/providers/tts";
 import { askAssistant, assistantAvailable } from "@/server/assistant";
 import { commitImport, listImports, previewImport, undoImport } from "@/server/import";
 import { findDuplicates, markNotDuplicates, mergeClients } from "@/server/merge";
@@ -702,7 +702,7 @@ async function handle(request: NextRequest, parts: string[]) {
   }
   if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
   // VOICE-PRO-01: the live voice. GET says whether the salon has it, POST turns a phrase into mp3.
-  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean((await activeIntegration(ctx, "voice")) ?? (await activeIntegration(ctx, "assistant"))), assistant: await assistantAvailable(ctx) })));
+  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean(localVoiceUrl() || (await activeIntegration(ctx, "voice")) || (await activeIntegration(ctx, "assistant"))), assistant: await assistantAvailable(ctx) })));
   if (key === "POST voice/ask") {
     const body = await readJson(request);
     const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
@@ -712,11 +712,24 @@ async function handle(request: NextRequest, parts: string[]) {
     const body = await readJson(request);
     const text = String(body.text ?? "").trim().slice(0, 600);
     if (!text) return NextResponse.json({ error: { code: "VALIDATION", message: "Пустая фраза" } }, { status: 400 });
-    // A voice provider when on; otherwise the assistant's own provider, if it can speak.
-    const voice = await run(async (ctx) => (await activeIntegration(ctx, "voice")) ?? (await activeIntegration(ctx, "assistant")));
-    if (!voice) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Голос не подключён" } }, { status: 404 });
-    const audio = await synthesize(voice.provider, voice.config, text);
-    return new NextResponse(audio, { headers: { "content-type": voice.provider === "salute_speech" ? "audio/wav" : "audio/mpeg", "cache-control": "no-store" } });
+    // VOICE-LOCAL-01: a voice provider when on; then our own server voice; then the assistant's provider
+    // only when its speech model is set (reg.cloud and most proxies have no speech).
+    const voices = await run(async (ctx) => {
+      const chosen = await activeIntegration(ctx, "voice");
+      const brain = await activeIntegration(ctx, "assistant");
+      return [chosen, localVoiceUrl() && chosen?.provider !== "local_voice" ? { provider: "local_voice", config: {} } : null, brain && (brain.provider === "openai_voice" ? !brain.config.baseUrl || brain.config.ttsModel : brain.config.ttsModel) ? brain : null].filter(Boolean) as { provider: string; config: Record<string, string> }[];
+    });
+    if (!voices.length) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Голос не подключён" } }, { status: 404 });
+    let failure: unknown = null;
+    for (const voice of voices) {
+      try {
+        const audio = await synthesize(voice.provider, voice.config, text);
+        return new NextResponse(audio, { headers: { "content-type": voice.provider === "salute_speech" || voice.provider === "local_voice" ? "audio/wav" : "audio/mpeg", "cache-control": "no-store" } });
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw failure;
   }
   if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {
     const body = await readJson(request);
