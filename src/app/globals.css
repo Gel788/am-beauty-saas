@@ -795,3 +795,67 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .mini-cal-today { display: block; width: 100%; margin-top: 6px; border: 0; background: rgba(124, 92, 255, 0.08); color: #6d4fe0; border-radius: 10px; padding: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
 @media (max-width: 980px) { .mini-cal { display: none; } }
 @media (max-height: 900px) and (min-width: 981px) { .nav-item { padding: 5px 10px; font-size: 13.5px; } .wordmark { padding-bottom: 8px; } .salon-switch { margin-bottom: 8px; } }
+
+/* CMD-BAR-*: one line for everything (⌘K) */
+.cmd-pill { display: flex; align-items: center; gap: 8px; width: 100%; margin: 4px 0 6px; padding: 9px 10px 9px 12px; border: 1px solid rgba(124, 92, 255, 0.18); border-radius: 14px; background: rgba(255, 255, 255, 0.72); color: var(--muted); font-size: 14px; text-align: left; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.cmd-pill:hover { border-color: rgba(124, 92, 255, 0.45); box-shadow: 0 6px 20px rgba(124, 92, 255, 0.14); transform: translateY(-1px); }
+.cmd-pill span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd-pill kbd, .cmd kbd { font: 600 11px/1 var(--font-sans); padding: 4px 6px; border-radius: 6px; background: #f1ebf7; color: #6c5a84; border: 1px solid rgba(90, 50, 120, 0.12); }
+.cmd-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding: 11vh 16px 16px; background: rgba(28, 20, 40, 0.28); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: cmd-fade .16s ease-out; }
+.cmd { min-width: 0; width: min(680px, 100%); max-height: min(620px, 80vh); max-height: min(620px, 80dvh); display: flex; flex-direction: column; border-radius: 24px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 30px 80px rgba(60, 20, 90, 0.28), 0 0 0 1px rgba(124, 92, 255, 0.16); overflow: hidden; animation: cmd-pop .2s cubic-bezier(.2, .9, .3, 1.2); }
+.cmd-input { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.cmd-input svg { color: #9b6bff; flex-shrink: 0; }
+.cmd-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 19px; }
+.cmd-input input::placeholder { color: var(--faint); }
+.cmd-list { overflow-y: auto; overscroll-behavior: contain; padding: 8px; flex: 1; min-height: 0; }
+.cmd-item { min-width: 0; display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 14px; background: transparent; text-align: left; }
+.cmd-item.on { background: #f4eefb; }
+.cmd-item.action { background: linear-gradient(90deg, rgba(124, 92, 255, 0.1), rgba(255, 77, 141, 0.08)); margin-bottom: 4px; }
+.cmd-item.action.on { background: linear-gradient(90deg, rgba(124, 92, 255, 0.2), rgba(255, 77, 141, 0.16)); box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.25); }
+.cmd-item.action .cmd-icon { background: linear-gradient(135deg, #7c5cff, #ff4d8d); color: white; }
+.cmd-icon { width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; border-radius: 11px; background: #f3edf9; color: #7a5aa8; }
+.cmd-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cmd-text b { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-text small { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-enter { color: #9b6bff; flex-shrink: 0; }
+.cmd-empty { padding: 14px 12px 18px; color: var(--muted); }
+.cmd-empty p { margin: 0 0 10px; }
+.cmd-examples { display: flex; flex-wrap: wrap; gap: 8px; }
+.cmd-examples button { border: 1px solid rgba(124, 92, 255, 0.2); background: white; border-radius: 999px; padding: 7px 12px; font-size: 13px; color: #5b4580; }
+.cmd-examples button:hover { background: #f4eefb; }
+.cmd-foot { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+.cmd-foot span { display: flex; align-items: center; gap: 4px; }
+@keyframes cmd-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cmd-pop { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
+@media (max-width: 720px) {
+  .cmd-backdrop { padding-top: 12px; }
+  .cmd-input input { font-size: 16px; }
+  .cmd-foot { display: none; }
+  .cmd-pill kbd { display: none; }
+  .cmd-pill { width: auto; flex: 0 0 auto; margin: 0; padding: 9px 12px; }
+  .cmd-pill span { display: none; }
+}
+
+/* SIDEBAR-01: the side menu folds into a strip of icons (desktop; phones already have a top bar). */
+.side-toggle { margin-left: auto; align-self: center; display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 10px; background: transparent; color: #8b8298; cursor: pointer; transition: background .15s, color .15s; }
+.side-toggle:hover { background: rgba(255, 255, 255, 0.85); color: var(--ink); }
+.sidebar { transition: width .22s ease, padding .22s ease; }
+@media (min-width: 981px) {
+  .sidebar.collapsed { width: 72px; padding-left: 10px; padding-right: 10px; }
+  .sidebar.collapsed .wordmark { flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 12px; }
+  .sidebar.collapsed .wordmark .beauty { display: none; }
+  .sidebar.collapsed .side-toggle { margin-left: 0; }
+  .sidebar.collapsed .salon-switch { width: 100%; margin: 0 0 10px; padding: 6px; justify-content: center; }
+  .sidebar.collapsed .salon-switch > :not(img) { display: none; }
+  .sidebar.collapsed .cmd-pill { justify-content: center; padding: 10px 0; }
+  .sidebar.collapsed .cmd-pill span, .sidebar.collapsed .cmd-pill kbd { display: none; }
+  .sidebar.collapsed .nav-item { position: relative; justify-content: center; gap: 0; padding: 10px 0; font-size: 0; }
+  .sidebar.collapsed .nav-label { display: none; }
+  .sidebar.collapsed .nav-badge { position: absolute; top: 2px; right: 4px; margin: 0; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; }
+  .sidebar.collapsed .mini-cal, .sidebar.collapsed .ai-week, .sidebar.collapsed .app-device { display: none; }
+  .sidebar.collapsed .user-row { flex-direction: column; gap: 6px; padding: 8px 4px; }
+  .sidebar.collapsed .user-row > div { display: none; }
+  .sidebar.collapsed .user-row button { margin: 0; }
+  .sidebar.collapsed .branch-menu { right: auto; width: 260px; }
+}
+@media (max-width: 980px) { .side-toggle { display: none; } }
