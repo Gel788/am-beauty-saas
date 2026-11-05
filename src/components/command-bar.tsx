@@ -277,7 +277,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
           }),
         });
         toast(`Записано: ${parsed.client?.name ?? "клиент"} к ${parsed.staff.name}, ${dayTitle(parsed.date, today, timezone)} в ${hhmm(parsed.time)}`);
-        say(`Готово. ${parsed.client?.name.split(" ")[0] ?? "Клиент"} записана к ${parsed.staff.name.split(" ")[0]}, ${dayTitle(parsed.date, today, timezone)}, в ${hhmm(parsed.time)}`);
+        say(`Готово. Записано: ${parsed.client?.name.split(" ")[0] ?? "без клиента"}, мастер ${parsed.staff.name.split(" ")[0]}, ${dayTitle(parsed.date, today, timezone)}, в ${hhmm(parsed.time)}`);
         spokenRef.current = false;
         go(`/journal?date=${parsed.date}&branch=${branch.id}&open=${created.id}`);
       } catch (error) {
@@ -467,6 +467,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const stuck = voiceArmed && !autoItem && !busy && !voice.listening && items.length ? items : null;
   const stuckSign = stuck ? stuck.slice(0, 4).map((item) => `${item.key}|${item.title}|${item.hint ?? ""}`).join("~") : "";
   const stuckRef = useRef(stuck);
+  const parsedRef = useRef(parsed);
+  parsedRef.current = parsed;
   stuckRef.current = stuck;
   useEffect(() => {
     if (!stuckSign) return;
@@ -479,12 +481,16 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
       if (first.key === "book" && first.hint) {
         const problem = first.hint
           .replace(/\s*\(«[^»]*»\)/g, "")
-          .replace(/^Добавьте другое время: это занято$/, "Это время занято")
-          .replace(/^Добавьте другой день: у мастера нет свободного времени$/, "В этот день у мастера нет свободного времени")
           .replace(/^Добавьте /, "Скажите ещё: ");
-        say([problem, alt ? alt.title : ""].filter(Boolean).join(". "));
+        const who = parsedRef.current.staff?.name.split(" ")[0] ?? "мастера";
+        const text = /^Скажите ещё: другой день/.test(problem)
+          ? `${who}: в этот день нет свободного времени`
+          : /^Скажите ещё: другое время/.test(problem)
+            ? `${who}: это время занято`
+            : problem;
+        say([text, alt ? alt.title : ""].filter(Boolean).join(". "));
       }
-      else say(list.length === 1 ? first.title : `Нашла: ${first.title}`);
+      else say(list.length === 1 ? first.title : `Вот что есть: ${first.title}`);
     }, AUTO_MS + 800);
     return () => clearTimeout(timer);
   }, [stuckSign, say]);
