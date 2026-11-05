@@ -77,7 +77,9 @@ function TeamView({ me }: { me: Me }) {
   const load = useCallback(async () => {
     const rows = await api<Staff[]>("/api/staff");
     setStaff(rows);
-    setSelected((current) => current || rows.find((row) => row.active)?.id || "");
+    // CMD-BAR: /staff?open=<id> opens that master.
+    const wanted = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("open") : null;
+    setSelected((current) => current || (wanted && rows.some((row) => row.id === wanted) ? wanted : "") || rows.find((row) => row.active)?.id || "");
   }, []);
   const loadPending = useCallback(() => {
     if (!canEdit) return;

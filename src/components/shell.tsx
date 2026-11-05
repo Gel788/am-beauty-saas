@@ -13,6 +13,7 @@ import { MiniCalendar } from "./mini-calendar";
 import { AppDevice } from "./pwa";
 import { CallPopup } from "./calls";
 import { BillingBanner } from "./billing-view";
+import { CommandBar, CommandButton } from "./command-bar";
 
 type Me = {
   actor: { name: string; role: string };
@@ -95,6 +96,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <span className="beauty">BEAUTY</span>
           </div>
           {me && <BranchSwitcher branches={me.branches} role={me.actor.role} />}
+          {me && <CommandButton />}
           <nav className="nav">
             {LINKS.filter((link) => (!me || link.roles.includes(me.actor.role)) && (!link.multi || (me?.branches.length ?? 0) > 1)).map((link) => {
               const Icon = link.icon;
@@ -141,6 +143,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+      {me && <CommandBar branches={me.branches} role={me.actor.role} />}
       {showAi && <AiPanel />}
       {me && DESK.includes(me.actor.role) && <CallPopup />}
     </div>
