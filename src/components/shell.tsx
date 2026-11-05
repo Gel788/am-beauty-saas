@@ -9,6 +9,7 @@ import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
+import { CommandBar, CommandButton } from "./command-bar";
 
 type Me = {
   actor: { name: string; role: string };
@@ -81,6 +82,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </button>
           )}
+          {me && <CommandButton />}
           <nav className="nav">
             {LINKS.filter((link) => !me || link.roles.includes(me.actor.role)).map((link) => {
               const Icon = link.icon;
@@ -125,6 +127,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+      {me && <CommandBar branches={me.branches} role={me.actor.role} />}
       {showAi && <AiPanel />}
     </div>
   );
