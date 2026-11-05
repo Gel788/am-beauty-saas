@@ -6,11 +6,11 @@
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Mic, Scissors, Search, Sparkles, UserRound, Users } from "lucide-react";
+import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Mic, Scissors, Search, Sparkles, UserRound, Users, Volume2, VolumeX } from "lucide-react";
 import { api, type ApiError } from "./api";
 import { createPortal } from "react-dom";
 import { useToast } from "./ui";
-import { useVoice } from "./voice";
+import { speak, useVoice, useVoiceReply } from "./voice";
 
 /** Renders over everything, outside the sidebar and page scroll. */
 function Overlay({ children }: { children: React.ReactNode }) {
@@ -83,12 +83,19 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const preset = useRef("");
   const listenOnOpen = useRef(false);
   const [voiceArmed, setVoiceArmed] = useState(false);
+  // VOICE-03: the last phrase was said, not typed, so the answer is said out loud too.
+  const spokenRef = useRef(false);
+  const reply = useVoiceReply();
+  const say = useCallback((phrase: string) => {
+    if (spokenRef.current) speak(phrase);
+  }, []);
   // VOICE-01: dictate the same phrase you would type.
   const voice = useVoice((spoken, final) => {
     setText(spokenToDigits(spoken));
     setWarnings(null);
     // VOICE-02: a finished phrase arms auto-run, so the command happens without a key press.
     setVoiceArmed(final);
+    if (final) spokenRef.current = true;
     if (final) setTimeout(() => inputRef.current?.focus(), 0);
   });
   const [active, setActive] = useState(0);
@@ -270,6 +277,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
           }),
         });
         toast(`Записано: ${parsed.client?.name ?? "клиент"} к ${parsed.staff.name}, ${dayTitle(parsed.date, today, timezone)} в ${hhmm(parsed.time)}`);
+        say(`Готово. ${parsed.client?.name.split(" ")[0] ?? "Клиент"} записана к ${parsed.staff.name.split(" ")[0]}, ${dayTitle(parsed.date, today, timezone)}, в ${hhmm(parsed.time)}`);
+        spokenRef.current = false;
         go(`/journal?date=${parsed.date}&branch=${branch.id}&open=${created.id}`);
       } catch (error) {
         const err = error as ApiError;
@@ -277,12 +286,16 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
           const list = ((err.details?.warnings as string[] | undefined) ?? []).map((code) => WARNINGS[code] ?? code);
           setWarnings(list);
           setActive(0);
-        } else toast(err.message, "error");
+          say(`Внимание: ${list.join(". ")}. Если всё равно записать, нажмите Enter`);
+        } else {
+          toast(err.message, "error");
+          say(err.message);
+        }
       } finally {
         setBusy(false);
       }
     },
-    [branch, parsed, timezone, toast, go, today],
+    [branch, parsed, timezone, toast, go, today, say],
   );
 
   const items = useMemo<Item[]>(() => {
@@ -440,10 +453,41 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     if (!autoSign) return;
     const timer = setTimeout(() => {
       setVoiceArmed(false);
-      void autoRef.current?.run();
+      const item = autoRef.current;
+      if (item && item.key !== "book") {
+        say(`Открываю: ${item.title.replace(/^Открыть журнал: /, "журнал, ")}`);
+        spokenRef.current = false;
+      }
+      void item?.run();
     }, AUTO_MS);
     return () => clearTimeout(timer);
-  }, [autoSign]);
+  }, [autoSign, say]);
+
+  // VOICE-03: the phrase is said but cannot run as is: say what is missing or what is free instead.
+  const stuck = voiceArmed && !autoItem && !busy && !voice.listening && items.length ? items : null;
+  const stuckSign = stuck ? stuck.slice(0, 4).map((item) => `${item.key}|${item.title}|${item.hint ?? ""}`).join("~") : "";
+  const stuckRef = useRef(stuck);
+  stuckRef.current = stuck;
+  useEffect(() => {
+    if (!stuckSign) return;
+    const timer = setTimeout(() => {
+      const list = stuckRef.current;
+      if (!list) return;
+      setVoiceArmed(false);
+      const first = list[0];
+      const alt = list.find((item) => item.key === "ahead" || item.key.startsWith("slot-") || item.key.startsWith("other-"));
+      if (first.key === "book" && first.hint) {
+        const problem = first.hint
+          .replace(/\s*\(«[^»]*»\)/g, "")
+          .replace(/^Добавьте другое время: это занято$/, "Это время занято")
+          .replace(/^Добавьте другой день: у мастера нет свободного времени$/, "В этот день у мастера нет свободного времени")
+          .replace(/^Добавьте /, "Скажите ещё: ");
+        say([problem, alt ? alt.title : ""].filter(Boolean).join(". "));
+      }
+      else say(list.length === 1 ? first.title : `Нашла: ${first.title}`);
+    }, AUTO_MS + 800);
+    return () => clearTimeout(timer);
+  }, [stuckSign, say]);
   useEffect(() => {
     if (!open) setVoiceArmed(false);
   }, [open]);
@@ -489,6 +533,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 setText(event.target.value);
                 setWarnings(null);
                 setVoiceArmed(false);
+                spokenRef.current = false;
               }}
               placeholder={voice.listening ? "Говорите…" : "Найти или сделать… «запиши Анну к Алине завтра в 15»"}
               aria-label="Что сделать"
@@ -502,6 +547,17 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 title="Сказать голосом"
               >
                 <Mic size={18} />
+              </button>
+            )}
+            {voice.supported && (
+              <button
+                type="button"
+                className={`cmd-speak ${reply.on ? "on" : ""}`}
+                onClick={reply.toggle}
+                aria-label={reply.on ? "Выключить голосовые ответы" : "Включить голосовые ответы"}
+                title={reply.on ? "Отвечать голосом: вкл" : "Отвечать голосом: выкл"}
+              >
+                {reply.on ? <Volume2 size={17} /> : <VolumeX size={17} />}
               </button>
             )}
             <kbd>esc</kbd>
