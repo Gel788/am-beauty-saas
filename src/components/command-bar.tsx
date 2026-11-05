@@ -6,10 +6,11 @@
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Scissors, Search, Sparkles, UserRound, Users } from "lucide-react";
+import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Mic, Scissors, Search, Sparkles, UserRound, Users } from "lucide-react";
 import { api, type ApiError } from "./api";
 import { createPortal } from "react-dom";
 import { useToast } from "./ui";
+import { useVoice } from "./voice";
 
 /** Renders over everything, outside the sidebar and page scroll. */
 function Overlay({ children }: { children: React.ReactNode }) {
@@ -17,7 +18,7 @@ function Overlay({ children }: { children: React.ReactNode }) {
   useEffect(() => setHost(document.body), []);
   return host ? createPortal(children, host) : null;
 }
-import { matchPages, normalize, parseCommand, type Named, type ServiceRef } from "@/domain/command";
+import { matchPages, normalize, parseCommand, spokenToDigits, type Named, type ServiceRef } from "@/domain/command";
 import { addCalendarDays, todayInZone, weekdayLabel, zonedDateTimeToUtc } from "@/domain/time";
 
 type Branch = { id: string; name: string; timezone: string };
@@ -79,6 +80,13 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const preset = useRef("");
+  const listenOnOpen = useRef(false);
+  // VOICE-01: dictate the same phrase you would type.
+  const voice = useVoice((spoken, final) => {
+    setText(spokenToDigits(spoken));
+    setWarnings(null);
+    if (final) setTimeout(() => inputRef.current?.focus(), 0);
+  });
   const [active, setActive] = useState(0);
   const [staff, setStaff] = useState<StaffDto[]>([]);
   const [services, setServices] = useState<ServiceDto[]>([]);
@@ -107,8 +115,9 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     };
     // PULSE-01: «Записать к …» from the day panel opens the bar with the phrase started.
     const onOpen = (event: Event) => {
-      const text = (event as CustomEvent<{ text?: string } | undefined>).detail?.text;
-      preset.current = text ?? "";
+      const detail = (event as CustomEvent<{ text?: string; voice?: boolean } | undefined>).detail;
+      preset.current = detail?.text ?? "";
+      listenOnOpen.current = Boolean(detail?.voice);
       setOpen(true);
     };
     window.addEventListener("keydown", onKey);
@@ -126,7 +135,12 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     setActive(0);
     setWarnings(null);
     setTimeout(() => inputRef.current?.focus(), 10);
-  }, [open]);
+    if (listenOnOpen.current) {
+      listenOnOpen.current = false;
+      voice.start();
+    }
+    return () => voice.stop();
+  }, [open, voice.start, voice.stop]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open || staff.length) return;
@@ -440,13 +454,31 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 setText(event.target.value);
                 setWarnings(null);
               }}
-              placeholder="Найти или сделать… «запиши Анну к Алине завтра в 15»"
+              placeholder={voice.listening ? "Говорите…" : "Найти или сделать… «запиши Анну к Алине завтра в 15»"}
               aria-label="Что сделать"
             />
+            {voice.supported && (
+              <button
+                type="button"
+                className={`cmd-mic ${voice.listening ? "on" : ""}`}
+                onClick={() => (voice.listening ? voice.stop() : voice.start())}
+                aria-label={voice.listening ? "Остановить запись голоса" : "Сказать голосом"}
+                title="Сказать голосом"
+              >
+                <Mic size={18} />
+              </button>
+            )}
             <kbd>esc</kbd>
           </div>
           <div className="cmd-list" ref={listRef}>
-            {!text.trim() && (
+            {voice.error && <div className="cmd-voice-error">{voice.error}</div>}
+            {voice.listening && !text.trim() && (
+              <div className="cmd-empty cmd-listening">
+                <div className="cmd-wave" aria-hidden><i /><i /><i /><i /><i /></div>
+                <p>Слушаю. Скажите, например: «запиши Анну к Алине завтра в пятнадцать на маникюр»</p>
+              </div>
+            )}
+            {!text.trim() && !voice.listening && (
               <div className="cmd-empty">
                 <p>Пишите как говорите. Например:</p>
                 <div className="cmd-examples">
@@ -497,10 +529,21 @@ export function CommandButton() {
   const [mac, setMac] = useState(true);
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
   return (
-    <button type="button" className="cmd-pill" onClick={() => window.dispatchEvent(new Event("open-command-bar"))}>
-      <Search size={16} />
-      <span>Найти или сделать…</span>
-      <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd>
-    </button>
+    <div className="cmd-pill-row">
+      <button type="button" className="cmd-pill" onClick={() => window.dispatchEvent(new Event("open-command-bar"))}>
+        <Search size={16} />
+        <span>Найти или сделать…</span>
+        <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd>
+      </button>
+      <button
+        type="button"
+        className="cmd-pill-mic"
+        aria-label="Сказать голосом"
+        title="Сказать голосом"
+        onClick={() => window.dispatchEvent(new CustomEvent("open-command-bar", { detail: { voice: true } }))}
+      >
+        <Mic size={16} />
+      </button>
+    </div>
   );
 }

@@ -888,3 +888,21 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 .pulse-btn:hover:not(:disabled) { transform: translateY(-1px); }
 .pulse-btn:disabled { opacity: .5; cursor: default; }
 @keyframes pulse-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* VOICE-01: dictation in the command bar */
+.cmd-pill-row { display: flex; gap: 6px; align-items: stretch; margin: 4px 0 6px; }
+.cmd-pill-row .cmd-pill { margin: 0; flex: 1; min-width: 0; }
+.cmd-pill-mic { flex: none; width: 40px; display: grid; place-items: center; border: 1px solid rgba(124, 92, 255, 0.18); border-radius: 14px; background: rgba(255, 255, 255, 0.72); color: #7c5cff; cursor: pointer; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.cmd-pill-mic:hover { border-color: rgba(124, 92, 255, 0.45); box-shadow: 0 6px 20px rgba(124, 92, 255, 0.14); transform: translateY(-1px); }
+.cmd-mic { flex: none; width: 38px; height: 38px; border-radius: 12px; border: 0; display: grid; place-items: center; background: #f3eefc; color: #7c5cff; cursor: pointer; position: relative; }
+.cmd-mic.on { background: linear-gradient(135deg, #7c5cff, #ff4d8d); color: #fff; }
+.cmd-mic.on::after { content: ""; position: absolute; inset: -5px; border-radius: 16px; border: 2px solid rgba(255, 77, 141, 0.45); animation: mic-ring 1.2s ease-out infinite; }
+.cmd-listening { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.cmd-wave { display: flex; gap: 5px; align-items: center; height: 34px; }
+.cmd-wave i { width: 5px; border-radius: 3px; background: linear-gradient(180deg, #7c5cff, #ff4d8d); animation: mic-wave 0.9s ease-in-out infinite; }
+.cmd-wave i:nth-child(2) { animation-delay: .1s; } .cmd-wave i:nth-child(3) { animation-delay: .2s; } .cmd-wave i:nth-child(4) { animation-delay: .3s; } .cmd-wave i:nth-child(5) { animation-delay: .4s; }
+.cmd-voice-error { margin: 6px 8px; padding: 8px 12px; border-radius: 12px; background: #fff1f2; color: #be123c; font-size: 13px; }
+@keyframes mic-ring { from { opacity: 1; transform: scale(0.9); } to { opacity: 0; transform: scale(1.25); } }
+@keyframes mic-wave { 0%, 100% { height: 8px; } 50% { height: 30px; } }
+@media (min-width: 981px) { .sidebar.collapsed .cmd-pill-row { flex-direction: column; } .sidebar.collapsed .cmd-pill-mic { width: 100%; height: 38px; } }
+@media (max-width: 720px) { .cmd-pill-row { margin: 0; flex: 0 0 auto; } .cmd-pill-mic { width: 38px; } }

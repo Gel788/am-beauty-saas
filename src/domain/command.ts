@@ -234,3 +234,52 @@ export function matchPages(text: string) {
     .sort((a, b) => b.score - a.score)
     .map((row) => row.page);
 }
+
+const SPOKEN: Record<string, number> = {
+  ноль: 0, один: 1, одну: 1, одна: 1, два: 2, две: 2, три: 3, четыре: 4, пять: 5, шесть: 6, семь: 7, восемь: 8, девять: 9, десять: 10,
+  одиннадцать: 11, двенадцать: 12, тринадцать: 13, четырнадцать: 14, пятнадцать: 15, шестнадцать: 16, семнадцать: 17, восемнадцать: 18,
+  девятнадцать: 19, двадцать: 20, тридцать: 30, сорок: 40, пятьдесят: 50,
+};
+
+/**
+ * VOICE-01: speech recognition writes «в пятнадцать тридцать», «через две недели», «в три часа дня».
+ * Turn number words into digits so parseCommand reads them like typed text.
+ */
+export function spokenToDigits(text: string) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i].toLowerCase().replace(/ё/g, "е");
+    if (!(word in SPOKEN)) {
+      out.push(words[i]);
+      continue;
+    }
+    let value = SPOKEN[word];
+    // «двадцать три» → 23
+    const next = words[i + 1]?.toLowerCase();
+    if (value >= 20 && next && next in SPOKEN && SPOKEN[next] < 10) {
+      value += SPOKEN[next];
+      i += 1;
+    }
+    // «пятнадцать тридцать» / «десять ноль ноль» right after «в»/«на» is a clock time.
+    const prev = out[out.length - 1]?.toLowerCase();
+    const after = words[i + 1]?.toLowerCase();
+    if ((prev === "в" || prev === "на") && value < 24 && after && after in SPOKEN) {
+      let minutes = SPOKEN[after];
+      let used = 1;
+      const tail = words[i + 2]?.toLowerCase();
+      if (minutes === 0 && tail === "ноль") used = 2;
+      else if (minutes >= 20 && tail && tail in SPOKEN && SPOKEN[tail] < 10) {
+        minutes += SPOKEN[tail];
+        used = 2;
+      }
+      if (minutes < 60 && (minutes >= 10 || minutes === 0)) {
+        out.push(`${value}:${String(minutes).padStart(2, "0")}`);
+        i += used;
+        continue;
+      }
+    }
+    out.push(String(value));
+  }
+  return out.join(" ");
+}
