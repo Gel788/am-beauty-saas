@@ -119,6 +119,15 @@ export function BookingWidget({ tenantSlug, branchSlug }: { tenantSlug: string; 
         const today = todayIn(data.branch.timezone);
         setFrom(today);
         setDate(today);
+        // SHOWCASE-01: a link from the salon page can choose the service (and master) up front.
+        const query = new URLSearchParams(window.location.search);
+        const chosen = data.services.find((item) => item.id === query.get("service"));
+        if (chosen) {
+          setService(chosen);
+          const staff = query.get("staff");
+          if (staff && chosen.staffIds.includes(staff)) setStaffId(staff);
+          setStep(2);
+        }
       })
       .catch((error: Failure) => setLoadError(error.message));
   }, [base]);

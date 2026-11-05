@@ -161,6 +161,14 @@ function OnlineBookingSettings({ branch, onSaved }: { branch: Branch; onSaved: (
           Для сайта: {`<iframe src="${link}" width="100%" height="720" style="border:0"></iframe>`}
         </span>
       </div>
+      <div className="field">
+        <label>Витрина салона</label>
+        <div className="row" style={{ gap: 8 }}>
+          <input readOnly value={link.replace("/b/", "/s/")} onFocus={(event) => event.target.select()} />
+          <a className="btn-ghost" href={link.replace("/b/", "/s/")} target="_blank" rel="noreferrer">Открыть</a>
+        </div>
+        <span className="muted" style={{ fontSize: 12 }}>Страница для клиентов: мастера с ближайшим свободным временем, цены, отзывы и кнопка записи.</span>
+      </div>
       <ChannelLinks link={link} />
       <div className="field"><label>Адрес салона в ссылке</label><input value={tenantSlug} onChange={(event) => setTenantSlug(event.target.value)} /></div>
       <div className="field"><label>Адрес филиала в ссылке</label><input value={draft.slug} onChange={(event) => set("slug", event.target.value)} /></div>
