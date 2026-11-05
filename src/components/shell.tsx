@@ -10,6 +10,7 @@ import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
 import { CommandBar, CommandButton } from "./command-bar";
+import { SidebarToggle, useSidebarCollapsed } from "./sidebar";
 
 type Me = {
   actor: { name: string; role: string };
@@ -47,6 +48,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [offline, setOffline] = useState(false);
+  const { collapsed, toggle } = useSidebarCollapsed();
   const showAi = pathname.startsWith("/journal") && DESK.includes(me?.actor.role ?? "owner");
 
   useEffect(() => {
@@ -68,10 +70,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="aurora">
       <div className="stage">
-        <aside className="sidebar">
+        <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
           <div className="wordmark">
             <span className="am">Am</span>
             <span className="beauty">BEAUTY</span>
+            <SidebarToggle collapsed={collapsed} onToggle={toggle} />
           </div>
           {branch && (
             <button className="salon-switch" type="button">
@@ -90,9 +93,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
               const active = link.label === "AI-ассистент" ? false : pathname === link.href || (link.href !== "/journal" && pathname.startsWith(link.href));
               const calendarActive = link.href === "/journal" && pathname.startsWith("/journal") && link.label === "Календарь";
               return (
-                <Link key={link.label} href={link.href} className={`nav-item ${active || calendarActive ? "active" : ""}`}>
+                <Link key={link.label} href={link.href} title={collapsed ? label : undefined} className={`nav-item ${active || calendarActive ? "active" : ""}`}>
                   <Icon />
-                  {label}
+                  <span className="nav-label">{label}</span>
                   {link.badge && <span className="nav-badge">{link.badge}</span>}
                 </Link>
               );
