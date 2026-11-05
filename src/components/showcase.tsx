@@ -140,7 +140,7 @@ export function Showcase({ tenantSlug, branchSlug }: { tenantSlug: string; branc
                   <span className="sc-muted">{member.specialties || services.slice(0, 2).map((item) => item.title).join(", ")}</span>
                   {rating && <span className="sc-rating">{stars(rating.rating)} {rating.rating.toFixed(1)} <small>({rating.count})</small></span>}
                   {services.length > 0 && <span className="sc-muted">от {formatMoney(minPrice(services.map((item) => item.id)), branch.currency)}</span>}
-                  <a className="sc-btn small" href={free ? `${book}?service=${free.serviceId}&staff=${member.id}` : services[0] ? `${book}?service=${services[0].id}&staff=${member.id}` : book}>
+                  <a className="sc-btn small" href={free ? `${book}?service=${free.serviceId}&staff=${member.id}&date=${free.date}` : services[0] ? `${book}?service=${services[0].id}&staff=${member.id}` : book}>
                     <CalendarCheck size={14} /> {free ? whenLabel(free.date, free.time, today) : "Записаться"}
                   </a>
                 </article>
