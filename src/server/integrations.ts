@@ -10,7 +10,7 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
-import { elevenCheck, OPENAI_VOICES, openaiCheck } from "./providers/tts";
+import { elevenCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL } from "./providers/tts";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
@@ -177,6 +177,21 @@ export const INTEGRATIONS: Definition[] = [
     async check() {
       return { ok: true, text: "Адрес готов: отправляйте события звонков" };
     },
+  },
+  {
+    provider: "reg_ai",
+    kind: "voice",
+    label: "REG.RU AI (ai.reg.cloud)",
+    about: "Ассистент и голос CRM на нейросетях REG.RU: работает с российского сервера, оплата в рублях. Нужен только API-ключ из кабинета ai.reg.cloud.",
+    docsUrl: "https://ai.reg.cloud/",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ", secret: true, required: true, placeholder: "sk-…" },
+      { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Пусто — gpt-6-luna. Умнее — gpt-6.1-sol" },
+      { key: "voice", label: "Голос", options: OPENAI_VOICES },
+      { key: "ttsModel", label: "Модель озвучки", placeholder: "gpt-4o-mini-tts", hint: "Если у провайдера нет озвучки, CRM говорит голосом браузера" },
+    ],
+    check: (config) => openaiCheck({ ...config, baseUrl: REG_AI_URL }),
   },
   {
     provider: "openai_voice",

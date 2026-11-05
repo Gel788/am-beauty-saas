@@ -11,6 +11,7 @@ import { getJournal } from "./appointments";
 import { listClients } from "./clients";
 import { dashboard } from "./dashboard";
 import { integrationConfig } from "./integrations";
+import { REG_AI_URL } from "./providers/tts";
 import { request } from "./providers/http";
 import type { Ctx } from "./types";
 
@@ -40,8 +41,15 @@ async function daySummary(ctx: Ctx, branchId: string, date: string, title: strin
   return lines.join("\n");
 }
 
+/** The OpenAI-compatible brain: REG.RU AI or any OpenAI-style provider, whichever is on. */
+async function brain(ctx: Ctx) {
+  const reg = await integrationConfig(ctx, "reg_ai");
+  if (reg?.apiKey) return { ...reg, baseUrl: REG_AI_URL, model: reg.model || "gpt-6-luna" };
+  return integrationConfig(ctx, "openai_voice");
+}
+
 export async function assistantAvailable(ctx: Ctx) {
-  return Boolean(await integrationConfig(ctx, "openai_voice"));
+  return Boolean((await brain(ctx))?.apiKey);
 }
 
 export type AssistantAction =
@@ -156,7 +164,7 @@ async function runTool(ctx: Ctx, branchId: string, name: string, args: Record<st
 }
 
 export async function askAssistant(ctx: Ctx, branchId: string, question: string, history: { role: "user" | "assistant"; content: string }[] = []) {
-  const config = await integrationConfig(ctx, "openai_voice");
+  const config = await brain(ctx);
   if (!config?.apiKey) throw new AppError("NOT_FOUND", "Подключите ключ в Настройки → Интеграции → Голос CRM");
   const text = question.trim().slice(0, 500);
   if (!text) throw new AppError("VALIDATION", "Пустой вопрос");
