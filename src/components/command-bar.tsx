@@ -126,7 +126,10 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     setActive(0);
     setWarnings(null);
     setTimeout(() => inputRef.current?.focus(), 10);
-    if (staff.length) return;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || staff.length) return;
     api<StaffDto[]>("/api/staff").then(setStaff).catch(() => undefined);
     api<{ services: ServiceDto[] }>("/api/catalog").then((data) => setServices(data.services.filter((service) => service.active))).catch(() => undefined);
   }, [open, staff.length]);

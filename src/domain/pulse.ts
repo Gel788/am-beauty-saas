@@ -120,7 +120,7 @@ export function buildPulse(input: {
       key: "unmarked",
       tone: "urgent",
       title: `Не отмечено ${unmarked.length} ${unmarked.length === 1 ? "прошедший визит" : unmarked.length < 5 ? "прошедших визита" : "прошедших визитов"}`,
-      hint: unmarked.slice(0, 3).map((row) => `${hhmm(row.startMin)} ${firstName(who(row))}`).join(" · ") + (unmarked.length > 3 ? " …" : "") + ". Пришли или неявка?",
+      hint: unmarked.slice(0, 3).map((row) => `${hhmm(row.startMin)} ${firstName(who(row))}`).join(" · ") + (unmarked.length > 3 ? " …" : "") + " Пришли или неявка?",
       actions: [
         { kind: "status", appointmentId: unmarked[0].id, version: unmarked[0].version, status: "arrived", label: `${firstName(who(unmarked[0]))} пришёл` },
         { kind: "open", appointmentId: unmarked[0].id, label: "Открыть" },
