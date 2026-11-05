@@ -53,6 +53,13 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      TTS_URL: ${TTS_URL:-http://tts:5002}
+
+  # VOICE-LOCAL-01: own Russian voice on this server (Piper). Works without any keys.
+  tts:
+    build: ./tts
+    restart: unless-stopped
+    mem_limit: 1g
 
   caddy:
     image: caddy:2
