@@ -151,13 +151,14 @@ function windowsFor(date, staffId, branchId, templates, exceptions) {
 
 const FIRST = ["Анастасия", "Екатерина", "Светлана", "Ирина", "Татьяна", "Наталья", "Елизавета", "Вероника", "Александра", "Софья", "Арина", "Валерия", "Милана", "Ева", "Кристина", "Евгения", "Олеся", "Диана", "Яна", "Маргарита"];
 const LAST = ["Иванова", "Петрова", "Сидорова", "Козлова", "Новикова", "Морозова", "Волкова", "Соловьёва", "Васильева", "Зайцева", "Павлова", "Семёнова", "Голубева", "Виноградова", "Богданова", "Воробьёва", "Фролова", "Тихонова", "Белова", "Комарова"];
+const demoName = (i) => `${FIRST[i % FIRST.length]} ${LAST[(i * 7 + Math.floor(i / FIRST.length) * 3) % LAST.length]}`;
 const MEN = ["Артём Ершов", "Максим Гусев", "Илья Титов", "Никита Кудрявцев", "Роман Баранов", "Кирилл Куликов", "Егор Абрамов", "Тимур Сафин"];
 
 async function ensureClients(client, { log }) {
   const extra = await client.query("SELECT count(*)::int AS n FROM clients WHERE tenant_id = $1 AND source = $2", [TENANT, MARK]);
   if (Number(extra.rows[0].n) === 0) {
     const names = [];
-    for (let i = 0; i < 48; i += 1) names.push(`${FIRST[i % FIRST.length]} ${LAST[(i * 7) % LAST.length]}`);
+    for (let i = 0; i < 48; i += 1) names.push(demoName(i));
     names.push(...MEN);
     let added = 0;
     for (const [i, name] of names.entries()) {
@@ -171,6 +172,14 @@ async function ensureClients(client, { log }) {
       added += 1;
     }
     log(`demo-month: ${added} more clients`);
+  }
+  // The first version repeated names every 20 clients: give each its own (by its phone number).
+  const own = (await client.query("SELECT c.id, c.name, p.phone_e164 FROM clients c JOIN client_phones p ON p.client_id = c.id AND p.is_primary WHERE c.tenant_id = $1 AND c.source = $2", [TENANT, MARK])).rows;
+  for (const row of own) {
+    const i = (Number(row.phone_e164.slice(5)) - 4100000) / 137;
+    if (Number.isInteger(i) && i >= 0 && i < 48 && row.name !== demoName(i) && row.name === `${FIRST[i % FIRST.length]} ${LAST[(i * 7) % LAST.length]}`) {
+      await client.query("UPDATE clients SET name = $2 WHERE id = $1", [row.id, demoName(i)]);
+    }
   }
   return (await client.query("SELECT id FROM clients WHERE tenant_id = $1 AND deleted_at IS NULL AND merged_into_id IS NULL", [TENANT])).rows.map((row) => row.id);
 }
