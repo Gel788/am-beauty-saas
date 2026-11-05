@@ -86,14 +86,19 @@ export function useVoice(onText: (text: string, final: boolean) => void) {
 
 const REPLY_KEY = "am-voice-reply";
 
-/** VOICE-03: the CRM answers out loud with the browser's own Russian voice. No keys, works without https. */
-export function speak(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  try {
-    if (window.localStorage.getItem(REPLY_KEY) === "off") return;
-  } catch {
-    // storage blocked: keep talking
-  }
+// VOICE-PRO-01: with the salon's SpeechKit key the answer comes as a live voice from the server.
+let liveVoice: Promise<boolean> | null = null;
+let playing: HTMLAudioElement | null = null;
+function hasLiveVoice() {
+  liveVoice ??= fetch("/api/voice")
+    .then((res) => (res.ok ? res.json() : { tts: false }))
+    .then((body: { tts?: boolean }) => Boolean(body.tts))
+    .catch(() => false);
+  return liveVoice;
+}
+
+function browserSpeak(text: string) {
+  if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   synth.cancel();
   const phrase = new SpeechSynthesisUtterance(text);
@@ -102,6 +107,40 @@ export function speak(text: string) {
   if (voice) phrase.voice = voice;
   phrase.rate = 1.05;
   synth.speak(phrase);
+}
+
+export function stopSpeaking() {
+  playing?.pause();
+  playing = null;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+/** VOICE-03: the CRM answers out loud: the live voice when connected, the browser's own otherwise. */
+export function speak(text: string) {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.localStorage.getItem(REPLY_KEY) === "off") return;
+  } catch {
+    // storage blocked: keep talking
+  }
+  stopSpeaking();
+  void (async () => {
+    if (await hasLiveVoice()) {
+      try {
+        const res = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+        if (!res.ok) throw new Error(String(res.status));
+        const url = URL.createObjectURL(await res.blob());
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        playing = audio;
+        await audio.play();
+        return;
+      } catch {
+        // the live voice failed: say it with the browser's voice
+      }
+    }
+    browserSpeak(text);
+  })();
 }
 
 /** Whether spoken answers are on (default on), with a switch remembered in this browser. */
@@ -122,7 +161,7 @@ export function useVoiceReply() {
       } catch {
         // ignore
       }
-      if (!next && typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+      if (!next) stopSpeaking();
       return next;
     });
   }, []);

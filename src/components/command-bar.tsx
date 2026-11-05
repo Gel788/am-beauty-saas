@@ -6,11 +6,12 @@
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Mic, Scissors, Search, Sparkles, UserRound, Users, Volume2, VolumeX } from "lucide-react";
+import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Ear, Mic, Scissors, Search, Sparkles, UserRound, Users, Volume2, VolumeX } from "lucide-react";
 import { api, type ApiError } from "./api";
 import { createPortal } from "react-dom";
 import { useToast } from "./ui";
 import { speak, useVoice, useVoiceReply } from "./voice";
+import { useWakeSwitch } from "./wake-word";
 
 /** Renders over everything, outside the sidebar and page scroll. */
 function Overlay({ children }: { children: React.ReactNode }) {
@@ -82,6 +83,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const [text, setText] = useState("");
   const preset = useRef("");
   const listenOnOpen = useRef(false);
+  const autoOnOpen = useRef(false);
+  const wake = useWakeSwitch();
   const [voiceArmed, setVoiceArmed] = useState(false);
   // VOICE-03: the last phrase was said, not typed, so the answer is said out loud too.
   const spokenRef = useRef(false);
@@ -126,8 +129,9 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     };
     // PULSE-01: «Записать к …» from the day panel opens the bar with the phrase started.
     const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ text?: string; voice?: boolean } | undefined>).detail;
+      const detail = (event as CustomEvent<{ text?: string; voice?: boolean; auto?: boolean } | undefined>).detail;
       preset.current = detail?.text ?? "";
+      autoOnOpen.current = Boolean(detail?.auto);
       listenOnOpen.current = Boolean(detail?.voice);
       setOpen(true);
     };
@@ -140,9 +144,16 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   }, []);
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent("command-bar-state", { detail: { open } }));
     if (!open) return;
     setText(preset.current);
     preset.current = "";
+    // VOICE-PRO-02: «Ассистент, …» arrives as a finished spoken phrase: run it like one.
+    if (autoOnOpen.current) {
+      autoOnOpen.current = false;
+      spokenRef.current = true;
+      setVoiceArmed(true);
+    }
     setActive(0);
     setWarnings(null);
     setTimeout(() => inputRef.current?.focus(), 10);
@@ -566,6 +577,17 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 {reply.on ? <Volume2 size={17} /> : <VolumeX size={17} />}
               </button>
             )}
+            {wake.supported && (
+              <button
+                type="button"
+                className={`cmd-speak ${wake.on ? "on" : ""}`}
+                onClick={wake.toggle}
+                aria-label={wake.on ? "Не слушать слово «Ассистент»" : "Слушать слово «Ассистент»"}
+                title={wake.on ? "Слушаю «Ассистент…» в фоне: вкл" : "Вызывать голосом «Ассистент…»: выкл"}
+              >
+                <Ear size={17} />
+              </button>
+            )}
             <kbd>esc</kbd>
           </div>
           <div className="cmd-list" ref={listRef}>
@@ -632,6 +654,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
 /** The pill in the menu that opens the bar. */
 export function CommandButton() {
   const [mac, setMac] = useState(true);
+  const wake = useWakeSwitch();
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
   return (
     <div className="cmd-pill-row">
@@ -642,9 +665,9 @@ export function CommandButton() {
       </button>
       <button
         type="button"
-        className="cmd-pill-mic"
+        className={`cmd-pill-mic ${wake.on ? "wake" : ""}`}
         aria-label="Сказать голосом"
-        title="Сказать голосом"
+        title={wake.on ? "Скажите «Ассистент…» или нажмите" : "Сказать голосом"}
         onClick={() => window.dispatchEvent(new CustomEvent("open-command-bar", { detail: { voice: true } }))}
       >
         <Mic size={16} />

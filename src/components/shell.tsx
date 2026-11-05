@@ -9,6 +9,7 @@ import { portraitFor, SALON_PHOTO } from "./portraits";
 import { AiPanel } from "./ai-panel";
 import { Notifications } from "./notifications";
 import { MiniCalendar } from "./mini-calendar";
+import { WakeWordListener } from "./wake-word";
 import { CommandBar, CommandButton } from "./command-bar";
 import { SidebarToggle, useSidebarCollapsed } from "./sidebar";
 
@@ -131,6 +132,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       {me && <CommandBar branches={me.branches} role={me.actor.role} />}
+      {me && <WakeWordListener />}
       {showAi && (
         <Suspense fallback={null}>
           <AiPanel />

@@ -7,7 +7,7 @@ import { Modal, useToast } from "./ui";
 type Field = { key: string; label: string; secret: boolean; required: boolean; placeholder: string; options: { value: string; label: string }[] | null; hint: string };
 type Integration = {
   provider: string;
-  kind: "telegram" | "sms" | "fiscal" | "acquiring";
+  kind: "telegram" | "sms" | "fiscal" | "acquiring" | "voice";
   label: string;
   about: string;
   docsUrl: string;
@@ -27,6 +27,7 @@ const GROUPS: { kind: Integration["kind"]; title: string; hint: string }[] = [
   { kind: "sms", title: "SMS", hint: "Для клиентов без Telegram. Работает один шлюз; включение другого выключает первый." },
   { kind: "fiscal", title: "Онлайн-касса (54-ФЗ)", hint: "После подключения выберите кассу в разделе «Чеки и онлайн-оплата» ниже." },
   { kind: "acquiring", title: "Эквайринг: карта и СБП", hint: "Нужен для оплаты по ссылке и предоплаты. Провайдера выбирают в «Чеки и онлайн-оплата»." },
+  { kind: "voice", title: "Голос CRM", hint: "Без ключа CRM отвечает голосом браузера. С ключом SpeechKit отвечает живым голосом диктора." },
 ];
 
 function Status({ item }: { item: Integration }) {
