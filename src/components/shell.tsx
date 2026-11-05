@@ -13,6 +13,7 @@ import { MiniCalendar } from "./mini-calendar";
 import { AppDevice } from "./pwa";
 import { CallPopup } from "./calls";
 import { BillingBanner } from "./billing-view";
+import { WakeWordListener } from "./wake-word";
 import { CommandBar, CommandButton } from "./command-bar";
 import { SidebarToggle, useSidebarCollapsed } from "./sidebar";
 
@@ -147,6 +148,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       {me && <CommandBar branches={me.branches} role={me.actor.role} />}
+      {me && <WakeWordListener />}
       {showAi && (
         <Suspense fallback={null}>
           <AiPanel />

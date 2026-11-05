@@ -10,13 +10,14 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
+import { SPEECHKIT_VOICES, speechkitCheck } from "./providers/speechkit";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
 import { decryptSecrets, encryptSecrets, maskSecret } from "./secrets";
 import type { Ctx } from "./types";
 
-export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "telephony";
+export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "telephony" | "voice";
 type Field = { key: string; label: string; secret?: boolean; required?: boolean; placeholder?: string; options?: { value: string; label: string }[]; hint?: string };
 type Definition = {
   provider: string;
@@ -176,6 +177,20 @@ export const INTEGRATIONS: Definition[] = [
     async check() {
       return { ok: true, text: "Адрес готов: отправляйте события звонков" };
     },
+  },
+  {
+    provider: "yandex_speechkit",
+    kind: "voice",
+    label: "Яндекс SpeechKit",
+    about: "Живой голос CRM вместо робота браузера: ответы на голосовые команды звучат голосом Алёны, Филиппа или другого диктора. В Яндекс Облаке создайте сервисный аккаунт с ролью ai.speechkit-tts.user, выпустите для него API-ключ и скопируйте ID каталога.",
+    docsUrl: "https://yandex.cloud/ru/docs/speechkit/concepts/auth",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ сервисного аккаунта", secret: true, required: true, placeholder: "AQVN…" },
+      { key: "folderId", label: "ID каталога", required: true, placeholder: "b1g…" },
+      { key: "voice", label: "Голос", options: SPEECHKIT_VOICES },
+    ],
+    check: (config) => speechkitCheck(config),
   },
 ];
 const BY_NAME = new Map(INTEGRATIONS.map((item) => [item.provider, item]));
