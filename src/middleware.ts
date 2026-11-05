@@ -8,6 +8,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/api") ||
     pathname.startsWith("/staff/") ||
     pathname.startsWith("/b/") ||
+    pathname.startsWith("/s/") ||
     pathname.startsWith("/booking/") ||
     pathname.startsWith("/pay/") ||
     pathname.startsWith("/r/") ||
