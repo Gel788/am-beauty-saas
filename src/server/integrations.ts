@@ -10,7 +10,7 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
-import { elevenCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL, SBER_VOICES, sberCheck } from "./providers/tts";
+import { elevenCheck, LOCAL_VOICES, localCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL, SBER_VOICES, sberCheck } from "./providers/tts";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
@@ -208,6 +208,16 @@ export const INTEGRATIONS: Definition[] = [
       { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Имя модели, как его пишет провайдер, с поддержкой инструментов (tools). Пусто — gpt-5-mini" },
     ],
     check: (config) => openaiCheck(config),
+  },
+  {
+    provider: "local_voice",
+    kind: "voice",
+    label: "Свой голос (на сервере CRM)",
+    about: "Русский голос, который работает прямо на сервере CRM: без ключей, без оплаты, без зарубежных сервисов. Включён сам, если ничего другого не подключено. Здесь можно выбрать голос.",
+    docsUrl: "https://github.com/rhasspy/piper",
+    exclusive: true,
+    fields: [{ key: "voice", label: "Голос", options: LOCAL_VOICES }],
+    check: () => localCheck(),
   },
   {
     provider: "salute_speech",
