@@ -10,14 +10,14 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
-import { elevenCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL } from "./providers/tts";
+import { elevenCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL, SBER_VOICES, sberCheck } from "./providers/tts";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
 import { decryptSecrets, encryptSecrets, maskSecret } from "./secrets";
 import type { Ctx } from "./types";
 
-export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "voice";
+export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "voice" | "assistant";
 type Field = { key: string; label: string; secret?: boolean; required?: boolean; placeholder?: string; options?: { value: string; label: string }[]; hint?: string };
 type Definition = {
   provider: string;
@@ -136,7 +136,7 @@ export const INTEGRATIONS: Definition[] = [
   },
   {
     provider: "reg_ai",
-    kind: "voice",
+    kind: "assistant",
     label: "REG.RU AI (ai.reg.cloud)",
     about: "Ассистент и голос CRM на нейросетях REG.RU: работает с российского сервера, оплата в рублях. Нужен только API-ключ из кабинета ai.reg.cloud.",
     docsUrl: "https://ai.reg.cloud/",
@@ -151,9 +151,9 @@ export const INTEGRATIONS: Definition[] = [
   },
   {
     provider: "openai_voice",
-    kind: "voice",
+    kind: "assistant",
     label: "OpenAI или совместимый провайдер",
-    about: "Ассистент, который понимает любые вопросы и просьбы («кто у Марины после обеда?», «отметь, что Ольга пришла»), и живой голос ответов. Подойдёт ключ OpenAI или любого провайдера с OpenAI-совместимым API: укажите его адрес и модель.",
+    about: "Ассистент, который понимает любые вопросы и просьбы («кто у Марины после обеда?», «отметь, что Ольга пришла»). Если провайдер умеет озвучку — и голос ответов. Подойдёт ключ OpenAI или любого провайдера с OpenAI-совместимым API: укажите его адрес и модель.",
     docsUrl: "https://platform.openai.com/api-keys",
     exclusive: true,
     fields: [
@@ -164,6 +164,20 @@ export const INTEGRATIONS: Definition[] = [
       { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Имя модели, как его пишет провайдер, с поддержкой инструментов (tools). Пусто — gpt-5-mini" },
     ],
     check: (config) => openaiCheck(config),
+  },
+  {
+    provider: "salute_speech",
+    kind: "voice",
+    label: "SaluteSpeech (Сбер)",
+    about: "Живой русский голос: Наталья, Борис, Марфа и другие. Работает с российского сервера, оплата в рублях, есть бесплатный объём. developers.sber.ru → SaluteSpeech → «Получить ключ»: скопируйте «Ключ авторизации».",
+    docsUrl: "https://developers.sber.ru/docs/ru/salutespeech/integration-individuals",
+    exclusive: true,
+    fields: [
+      { key: "authKey", label: "Ключ авторизации (Authorization key)", secret: true, required: true, placeholder: "MDE5…==" },
+      { key: "voice", label: "Голос", options: SBER_VOICES },
+      { key: "scope", label: "Тип аккаунта", options: [{ value: "SALUTE_SPEECH_PERS", label: "Физлицо" }, { value: "SALUTE_SPEECH_CORP", label: "Юрлицо / ИП" }] },
+    ],
+    check: (config) => sberCheck(config),
   },
   {
     provider: "elevenlabs",
