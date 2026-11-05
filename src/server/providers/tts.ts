@@ -86,8 +86,56 @@ export function elevenSpeech(config: Config, text: string) {
   );
 }
 
-/** The phrase as mp3 from whichever voice the salon switched on. */
+// VOICE-PRO-04: SaluteSpeech (Sber): natural Russian voices, works from Russian servers, paid in rubles.
+const SBER_OAUTH = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
+const SBER_TTS = "https://smartspeech.sber.ru/rest/v1/text:synthesize";
+export const SBER_VOICES = [
+  { value: "Nec_24000", label: "Наталья (женский, тёплый)" },
+  { value: "May_24000", label: "Марфа (женский)" },
+  { value: "Ost_24000", label: "Александра (женский)" },
+  { value: "Bys_24000", label: "Борис (мужской)" },
+  { value: "Tur_24000", label: "Тарас (мужской)" },
+  { value: "Pon_24000", label: "Сергей (мужской)" },
+];
+const sberTokens = new Map<string, { token: string; until: number }>();
+
+async function sberToken(config: Config) {
+  const key = (config.authKey ?? "").trim();
+  const cached = sberTokens.get(key);
+  if (cached && cached.until > Date.now() + 60_000) return cached.token;
+  const { ok, status, data, raw } = await request<{ access_token?: string; expires_at?: number; message?: string }>(SBER_OAUTH, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", Accept: "application/json", RqUID: crypto.randomUUID(), Authorization: `Basic ${key}` },
+    body: new URLSearchParams({ scope: config.scope || "SALUTE_SPEECH_PERS" }),
+  });
+  if (!ok || !data?.access_token) throw new Error(status === 401 || status === 400 ? "Сбер не принял ключ авторизации" : explain(status, raw, "SaluteSpeech"));
+  sberTokens.set(key, { token: data.access_token, until: data.expires_at ?? Date.now() + 25 * 60_000 });
+  return data.access_token;
+}
+
+export async function sberCheck(config: Config): Promise<CheckResult> {
+  if (!config.authKey) return { ok: false, text: "Вставьте ключ авторизации" };
+  try {
+    await sberToken(config);
+    return { ok: true, text: "Голос Сбера на связи" };
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    return { ok: false, text: /certificate|self.signed|UNABLE_TO/i.test(text) ? "Нет сертификата Минцифры на сервере: пересоберите сервер (install.sh)" : text };
+  }
+}
+
+export async function sberSpeech(config: Config, text: string) {
+  const token = await sberToken(config);
+  return audio(
+    `${SBER_TTS}?format=wav16&voice=${encodeURIComponent(config.voice || "Nec_24000")}`,
+    { method: "POST", headers: { "content-type": "application/text", Authorization: `Bearer ${token}` }, body: text.slice(0, 1000) },
+    "SaluteSpeech",
+  );
+}
+
+/** The phrase as audio from whichever voice the salon switched on. */
 export function synthesize(provider: string, config: Config, text: string) {
   if (provider === "elevenlabs") return elevenSpeech(config, text);
+  if (provider === "salute_speech") return sberSpeech(config, text);
   return openaiSpeech(provider === "reg_ai" ? { ...config, baseUrl: REG_AI_URL } : config, text);
 }

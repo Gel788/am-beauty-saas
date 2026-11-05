@@ -15,6 +15,10 @@ FROM node:22-alpine AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 RUN addgroup -S app && adduser -S app -G app
+# VOICE-PRO-04: SaluteSpeech (Sber) serves certificates of the Russian Trusted Root CA, which Node does not
+# ship. Fetch it at build time; without it only the Sber voice is unavailable, everything else works.
+RUN (wget -qO- https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt; echo; wget -qO- https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt) > /app/russian-ca.pem 2>/dev/null || true
+ENV NODE_EXTRA_CA_CERTS=/app/russian-ca.pem
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public

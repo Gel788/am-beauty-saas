@@ -833,7 +833,7 @@ async function handle(request: NextRequest, parts: string[]) {
   if (parts[0] === "clients" && parts[1] && parts[2] === "calls" && !parts[3] && method === "GET") return NextResponse.json(await run((ctx) => clientCalls(ctx, parts[1])));
   if (key === "GET integrations") return NextResponse.json(await run((ctx) => listIntegrations(ctx)));
   // VOICE-PRO-01: the live voice. GET says whether the salon has it, POST turns a phrase into mp3.
-  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean(await activeIntegration(ctx, "voice")), assistant: await assistantAvailable(ctx) })));
+  if (key === "GET voice") return NextResponse.json(await run(async (ctx) => ({ tts: Boolean((await activeIntegration(ctx, "voice")) ?? (await activeIntegration(ctx, "assistant"))), assistant: await assistantAvailable(ctx) })));
   if (key === "POST voice/ask") {
     const body = await readJson(request);
     const branchId = await resolveBranch(actor, body.branchId ? String(body.branchId) : null);
@@ -843,10 +843,11 @@ async function handle(request: NextRequest, parts: string[]) {
     const body = await readJson(request);
     const text = String(body.text ?? "").trim().slice(0, 600);
     if (!text) return NextResponse.json({ error: { code: "VALIDATION", message: "Пустая фраза" } }, { status: 400 });
-    const voice = await run((ctx) => activeIntegration(ctx, "voice"));
+    // A voice provider when on; otherwise the assistant's own provider, if it can speak.
+    const voice = await run(async (ctx) => (await activeIntegration(ctx, "voice")) ?? (await activeIntegration(ctx, "assistant")));
     if (!voice) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Голос не подключён" } }, { status: 404 });
     const audio = await synthesize(voice.provider, voice.config, text);
-    return new NextResponse(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
+    return new NextResponse(audio, { headers: { "content-type": voice.provider === "salute_speech" ? "audio/wav" : "audio/mpeg", "cache-control": "no-store" } });
   }
   if (parts[0] === "integrations" && parts[1] && !parts[2] && method === "PUT") {
     const body = await readJson(request);

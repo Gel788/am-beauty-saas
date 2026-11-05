@@ -97,15 +97,27 @@ function hasLiveVoice() {
   return liveVoice;
 }
 
+// The most human Russian voice the browser has: Edge's neural «Natural» voices, then Google's online
+// voice in Chrome, then Apple's enhanced Milena; the plain system voice only as the last resort.
+const PREFERRED = [/natural/i, /online/i, /google/i, /premium|enhanced|улучш/i, /milena|милена/i, /svetlana|dariya|светлана|дария/i];
+function bestRussianVoice(voices: SpeechSynthesisVoice[]) {
+  const russian = voices.filter((item) => item.lang.toLowerCase().startsWith("ru"));
+  for (const pattern of PREFERRED) {
+    const found = russian.find((item) => pattern.test(item.name));
+    if (found) return found;
+  }
+  return russian[0] ?? null;
+}
+
 function browserSpeak(text: string) {
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   synth.cancel();
   const phrase = new SpeechSynthesisUtterance(text);
   phrase.lang = "ru-RU";
-  const voice = synth.getVoices().find((item) => item.lang.toLowerCase().startsWith("ru"));
+  const voice = bestRussianVoice(synth.getVoices());
   if (voice) phrase.voice = voice;
-  phrase.rate = 1.05;
+  phrase.rate = 1.02;
   synth.speak(phrase);
 }
 
@@ -128,7 +140,11 @@ export function speak(text: string) {
     if (await hasLiveVoice()) {
       try {
         const res = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-        if (!res.ok) throw new Error(String(res.status));
+        if (!res.ok) {
+          // No live voice at this provider: stop asking the server for the rest of the visit.
+          if (res.status === 404 || res.status >= 500) liveVoice = Promise.resolve(false);
+          throw new Error(String(res.status));
+        }
         const url = URL.createObjectURL(await res.blob());
         const audio = new Audio(url);
         audio.onended = () => URL.revokeObjectURL(url);
