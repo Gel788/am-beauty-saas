@@ -83,3 +83,48 @@ export function useVoice(onText: (text: string, final: boolean) => void) {
 
   return { supported, listening, error, start, stop };
 }
+
+const REPLY_KEY = "am-voice-reply";
+
+/** VOICE-03: the CRM answers out loud with the browser's own Russian voice. No keys, works without https. */
+export function speak(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  try {
+    if (window.localStorage.getItem(REPLY_KEY) === "off") return;
+  } catch {
+    // storage blocked: keep talking
+  }
+  const synth = window.speechSynthesis;
+  synth.cancel();
+  const phrase = new SpeechSynthesisUtterance(text);
+  phrase.lang = "ru-RU";
+  const voice = synth.getVoices().find((item) => item.lang.toLowerCase().startsWith("ru"));
+  if (voice) phrase.voice = voice;
+  phrase.rate = 1.05;
+  synth.speak(phrase);
+}
+
+/** Whether spoken answers are on (default on), with a switch remembered in this browser. */
+export function useVoiceReply() {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    try {
+      setOn(window.localStorage.getItem(REPLY_KEY) !== "off");
+    } catch {
+      // ignore
+    }
+  }, []);
+  const toggle = useCallback(() => {
+    setOn((value) => {
+      const next = !value;
+      try {
+        window.localStorage.setItem(REPLY_KEY, next ? "on" : "off");
+      } catch {
+        // ignore
+      }
+      if (!next && typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+      return next;
+    });
+  }, []);
+  return { on, toggle };
+}
