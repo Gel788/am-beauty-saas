@@ -6,12 +6,13 @@
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarDays, CalendarPlus, CornerDownLeft, Ear, Mic, Scissors, Search, Sparkles, UserRound, Users, Volume2, VolumeX } from "lucide-react";
+import { ArrowRight, CalendarDays, CalendarPlus, Bot, CornerDownLeft, Ear, Mic, Scissors, Search, Sparkles, UserRound, Users, Volume2, VolumeX } from "lucide-react";
 import { api, type ApiError } from "./api";
 import { createPortal } from "react-dom";
 import { useToast } from "./ui";
 import { speak, useVoice, useVoiceReply } from "./voice";
 import { useWakeSwitch } from "./wake-word";
+import type { AssistantAction } from "@/server/assistant";
 
 /** Renders over everything, outside the sidebar and page scroll. */
 function Overlay({ children }: { children: React.ReactNode }) {
@@ -86,6 +87,11 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const autoOnOpen = useRef(false);
   const wake = useWakeSwitch();
   const [voiceArmed, setVoiceArmed] = useState(false);
+  // VOICE-PRO-03: the assistant (salon's own model key) for anything the phrase parser does not cover.
+  const [assistant, setAssistant] = useState(false);
+  const [answer, setAnswer] = useState<{ question: string; text: string; actions: AssistantAction[] } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   // VOICE-03: the last phrase was said, not typed, so the answer is said out loud too.
   const spokenRef = useRef(false);
   const reply = useVoiceReply();
@@ -163,6 +169,11 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     }
     return () => voice.stop();
   }, [open, voice.start, voice.stop]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open) return;
+    api<{ assistant?: boolean }>("/api/voice").then((body) => setAssistant(Boolean(body.assistant))).catch(() => setAssistant(false));
+  }, [open]);
 
   useEffect(() => {
     if (!open || staff.length) return;
@@ -267,6 +278,31 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
       router.push(href);
     },
     [router],
+  );
+
+  const askRef = useRef<(question: string) => void>(() => undefined);
+  const runAction = useCallback(
+    async (action: AssistantAction) => {
+      setAnswer(null);
+      if (action.kind === "command") {
+        spokenRef.current = true;
+        setText(action.text);
+        setVoiceArmed(true);
+      } else if (action.kind === "open") {
+        go(action.href);
+      } else {
+        try {
+          await api(`/api/appointments/${action.appointmentId}/status`, { method: "POST", body: JSON.stringify({ status: action.status, version: action.version, acknowledgeSoft: true }) });
+          toast(`Готово: ${action.label}`);
+          say("Готово");
+          window.dispatchEvent(new Event("journal-changed"));
+        } catch (error) {
+          toast((error as Error).message, "error");
+          say((error as Error).message);
+        }
+      }
+    },
+    [go, toast, say],
   );
 
   const book = useCallback(
@@ -443,8 +479,40 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
         out.push({ key: `service-${service.id}`, icon: Scissors, title: service.title, hint: `${service.durationMin} мин · ${rub(service.priceMinor)}`, run: () => go("/services") });
       }
     }
+    // 6. Anything else: ask the assistant. A question goes first; after a command it is the last resort.
+    if (assistant && query.length >= 6 && answer?.question !== query) {
+      const ask: Item = { key: "ask", icon: Bot, tone: "action", title: `Спросить ассистента: «${query}»`, hint: "ответит и предложит, что сделать", run: () => askRef.current(query) };
+      const question = parsed.intent !== "book" && (query.split(" ").length >= 3 || /\?$/.test(query));
+      if (question) out.unshift(ask);
+      else out.push(ask);
+    }
     return out;
-  }, [text, parsed, desk, branch, today, timezone, warnings, services, branchStaff, clients, go, book, free, slotTaken, duration, day, nowMin, ahead]);
+  }, [text, parsed, desk, branch, today, timezone, warnings, services, branchStaff, clients, go, book, free, slotTaken, duration, day, nowMin, ahead, assistant, answer]);
+
+  askRef.current = (question: string) => {
+    if (asking) return;
+    setAsking(true);
+    setVoiceArmed(false);
+    api<{ answer: string; actions: AssistantAction[] }>("/api/voice/ask", { method: "POST", body: JSON.stringify({ question, branchId: branch?.id, history: history.current }) })
+      .then((result) => {
+        history.current = [...history.current, { role: "user" as const, content: question }, { role: "assistant" as const, content: result.answer }].slice(-8);
+        setAnswer({ question, text: result.answer, actions: result.actions ?? [] });
+        say(result.answer);
+      })
+      .catch((error: Error) => {
+        setAnswer({ question, text: error.message, actions: [] });
+        say(error.message);
+      })
+      .finally(() => setAsking(false));
+  };
+
+  // VOICE-PRO-03: a spoken answer with one proposed action runs it after the same short countdown.
+  const answerAction = answer && spokenRef.current && answer.actions.length === 1 ? answer.actions[0] : null;
+  useEffect(() => {
+    if (!answerAction) return;
+    const timer = setTimeout(() => void runAction(answerAction), AUTO_MS + 1400);
+    return () => clearTimeout(timer);
+  }, [answerAction, runAction]);
 
   // VOICE-02: what a spoken phrase runs by itself once everything it needs has loaded.
   const autoItem = (() => {
@@ -455,7 +523,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
       const complete = parsed.staff && parsed.date && parsed.time !== null && parsed.services.length && free !== null && !slotTaken;
       return complete ? first : null;
     }
-    return first.key === "day" || first.key.startsWith("page-") || first.key.startsWith("client-") || first.key.startsWith("staff-") ? first : null;
+    return first.key === "ask" || first.key === "day" || first.key.startsWith("page-") || first.key.startsWith("client-") || first.key.startsWith("staff-") ? first : null;
   })();
   const autoSign = autoItem ? `${autoItem.key}|${autoItem.title}|${autoItem.hint ?? ""}` : "";
   const autoRef = useRef(autoItem);
@@ -506,7 +574,11 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
     return () => clearTimeout(timer);
   }, [stuckSign, say]);
   useEffect(() => {
-    if (!open) setVoiceArmed(false);
+    if (!open) {
+      setVoiceArmed(false);
+      setAnswer(null);
+      history.current = [];
+    }
   }, [open]);
 
   useEffect(() => setActive(0), [text]);
@@ -519,6 +591,11 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
   const current = Math.min(active, Math.max(items.length - 1, 0));
 
   const onKey = (event: React.KeyboardEvent) => {
+    if (answerAction && event.key === "Escape") {
+      spokenRef.current = false;
+      setAnswer({ ...answer!, actions: [...answer!.actions] });
+      return;
+    }
     if (autoItem && event.key !== "Enter") {
       // Any key stops the voice auto-run; Esc only cancels it and keeps the bar open.
       setVoiceArmed(false);
@@ -550,6 +627,7 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 setText(event.target.value);
                 setWarnings(null);
                 setVoiceArmed(false);
+                setAnswer(null);
                 spokenRef.current = false;
               }}
               placeholder={voice.listening ? "Говорите…" : "Найти или сделать… «запиши Анну к Алине завтра в 15»"}
@@ -592,6 +670,30 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
           </div>
           <div className="cmd-list" ref={listRef}>
             {voice.error && <div className="cmd-voice-error">{voice.error}</div>}
+            {asking && (
+              <div className="cmd-answer thinking">
+                <Bot size={18} />
+                <p>Думаю…</p>
+              </div>
+            )}
+            {answer && !asking && (
+              <div className="cmd-answer">
+                <Bot size={18} />
+                <div>
+                  <p>{answer.text}</p>
+                  {answer.actions.length > 0 && (
+                    <div className="cmd-answer-actions">
+                      {answer.actions.map((action, index) => (
+                        <button key={index} type="button" className={`cmd-answer-btn ${action === answerAction ? "auto" : ""}`} onClick={() => void runAction(action)}>
+                          {action.label}
+                          {action === answerAction && <span className="cmd-auto-bar" style={{ animationDuration: `${AUTO_MS + 1400}ms` }} aria-hidden />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {voice.listening && !text.trim() && (
               <div className="cmd-empty cmd-listening">
                 <div className="cmd-wave" aria-hidden><i /><i /><i /><i /><i /></div>

@@ -86,7 +86,7 @@ export function useVoice(onText: (text: string, final: boolean) => void) {
 
 const REPLY_KEY = "am-voice-reply";
 
-// VOICE-PRO-01: with the salon's SpeechKit key the answer comes as a live voice from the server.
+// VOICE-PRO-01: with the salon's OpenAI or ElevenLabs key the answer comes as a live voice from the server.
 let liveVoice: Promise<boolean> | null = null;
 let playing: HTMLAudioElement | null = null;
 function hasLiveVoice() {

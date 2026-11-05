@@ -27,7 +27,7 @@ const GROUPS: { kind: Integration["kind"]; title: string; hint: string }[] = [
   { kind: "sms", title: "SMS", hint: "Для клиентов без Telegram. Работает один шлюз; включение другого выключает первый." },
   { kind: "fiscal", title: "Онлайн-касса (54-ФЗ)", hint: "После подключения выберите кассу в разделе «Чеки и онлайн-оплата» ниже." },
   { kind: "acquiring", title: "Эквайринг: карта и СБП", hint: "Нужен для оплаты по ссылке и предоплаты. Провайдера выбирают в «Чеки и онлайн-оплата»." },
-  { kind: "voice", title: "Голос CRM", hint: "Без ключа CRM отвечает голосом браузера. С ключом SpeechKit отвечает живым голосом диктора." },
+  { kind: "voice", title: "Голос CRM", hint: "Без ключа CRM отвечает голосом браузера. С ключом OpenAI или ElevenLabs отвечает живым голосом." },
 ];
 
 function Status({ item }: { item: Integration }) {
