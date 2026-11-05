@@ -1252,3 +1252,9 @@ a.bk-primary { display: block; text-align: center; text-decoration: none; }
 @keyframes mic-wave { 0%, 100% { height: 8px; } 50% { height: 30px; } }
 @media (min-width: 981px) { .sidebar.collapsed .cmd-pill-row { flex-direction: column; } .sidebar.collapsed .cmd-pill-mic { width: 100%; height: 38px; } }
 @media (max-width: 720px) { .cmd-pill-row { margin: 0; flex: 0 0 auto; } .cmd-pill-mic { width: 38px; } }
+
+/* VOICE-02: a spoken command runs by itself after a short countdown. */
+.cmd-item { position: relative; overflow: hidden; }
+.cmd-auto-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: linear-gradient(90deg, #7c5cff, #e05cb0); transform-origin: left; animation: cmd-auto linear forwards; }
+@keyframes cmd-auto { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.cmd-auto-note { color: #7c5cff; font-weight: 600; }
