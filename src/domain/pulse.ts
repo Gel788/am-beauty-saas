@@ -162,7 +162,7 @@ export function buildPulse(input: {
       tone: "chance",
       title: `Освободилось окно, ждут ${slot.matches.length}`,
       hint: `${slot.date === today.date ? "Сегодня" : slot.date.split("-").reverse().slice(0, 2).join(".")} · ${slot.staffName} · ${slot.services || "услуга"} · первая в очереди ${entry.clientName}`,
-      actions: [{ kind: "offer", entryId: entry.id, appointmentId: slot.appointmentId, label: `Предложить ${firstName(entry.clientName)}` }, { kind: "link", href: "/retention", label: "Весь лист" }],
+      actions: [{ kind: "offer", entryId: entry.id, appointmentId: slot.appointmentId, label: `Предложить: ${firstName(entry.clientName)}` }, { kind: "link", href: "/retention", label: "Весь лист" }],
     });
   }
 
@@ -177,7 +177,7 @@ export function buildPulse(input: {
       tone: "chance",
       title: gaps.length === 1 ? `Свободно: ${firstName(top.name)} ${hhmm(top.startMin)}–${hhmm(top.endMin)}` : `Свободные окна у ${new Set(gaps.map((gap) => gap.staffId)).size} мастеров`,
       hint: gaps.slice(0, 3).map((gap) => `${firstName(gap.name)} ${hhmm(gap.startMin)}–${hhmm(gap.endMin)}`).join(" · "),
-      actions: gaps.slice(0, 2).map((gap) => ({ kind: "book" as const, text: `запиши к ${gap.name.split(" ")[0]} сегодня в ${hhmm(gap.startMin)} `, label: `Записать к ${firstName(gap.name)}` })),
+      actions: gaps.slice(0, 2).map((gap) => ({ kind: "book" as const, text: `запиши к ${gap.name.split(" ")[0]} сегодня в ${hhmm(gap.startMin)} `, label: `Записать: ${firstName(gap.name)}` })),
     });
   }
 
@@ -202,7 +202,7 @@ export function buildPulse(input: {
       title: `Пора вернуть ${due.length} ${due.length === 1 ? "клиента" : "клиентов"}`,
       hint: due.slice(0, 3).map((row) => `${firstName(row.clientName)} · ${row.services || row.staffName}`).join(" · "),
       actions: [
-        ...due.filter((row) => row.marketing).slice(0, 1).map((row) => ({ kind: "remind" as const, clientId: row.clientId, label: `Напомнить ${firstName(row.clientName)}` })),
+        ...due.filter((row) => row.marketing).slice(0, 1).map((row) => ({ kind: "remind" as const, clientId: row.clientId, label: `Напомнить: ${firstName(row.clientName)}` })),
         { kind: "link", href: "/retention", label: "Все" },
       ],
     });
