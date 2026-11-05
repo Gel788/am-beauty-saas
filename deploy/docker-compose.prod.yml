@@ -47,6 +47,13 @@ services:
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       SMS_RU_API_KEY: ${SMS_RU_API_KEY:-}
       SMS_SENDER: ${SMS_SENDER:-}
+      TTS_URL: ${TTS_URL:-http://tts:5002}
+
+  # VOICE-LOCAL-01: own Russian voice on this server (Piper). Works without any keys.
+  tts:
+    build: ./tts
+    restart: unless-stopped
+    mem_limit: 1g
 
   caddy:
     image: caddy:2

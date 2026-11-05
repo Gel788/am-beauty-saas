@@ -10,13 +10,14 @@ import { many, one } from "./db";
 import { atolCheck } from "./providers/atol";
 import type { CheckResult, Config } from "./providers/http";
 import { smscCheck, smsRuCheck } from "./providers/sms";
+import { elevenCheck, LOCAL_VOICES, localCheck, OPENAI_VOICES, openaiCheck, REG_AI_URL, SBER_VOICES, sberCheck } from "./providers/tts";
 import { tbankCheck } from "./providers/tbank";
 import { telegramApi } from "./providers/telegram";
 import { yookassaCheck } from "./providers/yookassa";
 import { decryptSecrets, encryptSecrets, maskSecret } from "./secrets";
 import type { Ctx } from "./types";
 
-export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring";
+export type IntegrationKind = "telegram" | "sms" | "fiscal" | "acquiring" | "voice" | "assistant";
 type Field = { key: string; label: string; secret?: boolean; required?: boolean; placeholder?: string; options?: { value: string; label: string }[]; hint?: string };
 type Definition = {
   provider: string;
@@ -132,6 +133,74 @@ export const INTEGRATIONS: Definition[] = [
       { key: "password", label: "Пароль терминала", secret: true, required: true },
     ],
     check: (config) => tbankCheck(config),
+  },
+  {
+    provider: "reg_ai",
+    kind: "assistant",
+    label: "REG.RU AI (ai.reg.cloud)",
+    about: "Ассистент и голос CRM на нейросетях REG.RU: работает с российского сервера, оплата в рублях. Нужен только API-ключ из кабинета ai.reg.cloud.",
+    docsUrl: "https://ai.reg.cloud/",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ", secret: true, required: true, placeholder: "sk-…" },
+      { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Пусто — gpt-6-luna. Умнее — gpt-6.1-sol" },
+      { key: "voice", label: "Голос", options: OPENAI_VOICES },
+      { key: "ttsModel", label: "Модель озвучки", placeholder: "gpt-4o-mini-tts", hint: "Если у провайдера нет озвучки, CRM говорит голосом браузера" },
+    ],
+    check: (config) => openaiCheck({ ...config, baseUrl: REG_AI_URL }),
+  },
+  {
+    provider: "openai_voice",
+    kind: "assistant",
+    label: "OpenAI или совместимый провайдер",
+    about: "Ассистент, который понимает любые вопросы и просьбы («кто у Марины после обеда?», «отметь, что Ольга пришла»). Если провайдер умеет озвучку — и голос ответов. Подойдёт ключ OpenAI или любого провайдера с OpenAI-совместимым API: укажите его адрес и модель.",
+    docsUrl: "https://platform.openai.com/api-keys",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ", secret: true, required: true, placeholder: "sk-…" },
+      { key: "voice", label: "Голос", options: OPENAI_VOICES },
+      { key: "ttsModel", label: "Модель озвучки", placeholder: "gpt-4o-mini-tts", hint: "Пусто — gpt-4o-mini-tts. Если у провайдера нет озвучки, CRM говорит голосом браузера" },
+      { key: "baseUrl", label: "Адрес API провайдера", placeholder: "https://api.openai.com/v1", hint: "Для провайдера или прокси: его адрес, совместимый с OpenAI. Пусто — напрямую в OpenAI" },
+      { key: "model", label: "Модель ассистента", placeholder: "gpt-6-luna", hint: "Имя модели, как его пишет провайдер, с поддержкой инструментов (tools). Пусто — gpt-5-mini" },
+    ],
+    check: (config) => openaiCheck(config),
+  },
+  {
+    provider: "local_voice",
+    kind: "voice",
+    label: "Свой голос (на сервере CRM)",
+    about: "Русский голос, который работает прямо на сервере CRM: без ключей, без оплаты, без зарубежных сервисов. Включён сам, если ничего другого не подключено. Здесь можно выбрать голос.",
+    docsUrl: "https://github.com/rhasspy/piper",
+    exclusive: true,
+    fields: [{ key: "voice", label: "Голос", options: LOCAL_VOICES }],
+    check: () => localCheck(),
+  },
+  {
+    provider: "salute_speech",
+    kind: "voice",
+    label: "SaluteSpeech (Сбер)",
+    about: "Живой русский голос: Наталья, Борис, Марфа и другие. Работает с российского сервера, оплата в рублях, есть бесплатный объём. developers.sber.ru → SaluteSpeech → «Получить ключ»: скопируйте «Ключ авторизации».",
+    docsUrl: "https://developers.sber.ru/docs/ru/salutespeech/integration-individuals",
+    exclusive: true,
+    fields: [
+      { key: "authKey", label: "Ключ авторизации (Authorization key)", secret: true, required: true, placeholder: "MDE5…==" },
+      { key: "voice", label: "Голос", options: SBER_VOICES },
+      { key: "scope", label: "Тип аккаунта", options: [{ value: "SALUTE_SPEECH_PERS", label: "Физлицо" }, { value: "SALUTE_SPEECH_CORP", label: "Юрлицо / ИП" }] },
+    ],
+    check: (config) => sberCheck(config),
+  },
+  {
+    provider: "elevenlabs",
+    kind: "voice",
+    label: "ElevenLabs",
+    about: "Самый живой голос. Ключ — elevenlabs.io → Profile → API Keys. Голос можно выбрать в библиотеке ElevenLabs и вставить его Voice ID.",
+    docsUrl: "https://elevenlabs.io/app/settings/api-keys",
+    exclusive: true,
+    fields: [
+      { key: "apiKey", label: "API-ключ", secret: true, required: true },
+      { key: "voiceId", label: "Voice ID", placeholder: "EXAVITQu4vr4xnSDxMaL", hint: "Пусто — голос Sarah, хорошо говорит по-русски" },
+    ],
+    check: (config) => elevenCheck(config),
   },
 ];
 const BY_NAME = new Map(INTEGRATIONS.map((item) => [item.provider, item]));

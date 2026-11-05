@@ -7,7 +7,7 @@ import { Modal, useToast } from "./ui";
 type Field = { key: string; label: string; secret: boolean; required: boolean; placeholder: string; options: { value: string; label: string }[] | null; hint: string };
 type Integration = {
   provider: string;
-  kind: "telegram" | "sms" | "fiscal" | "acquiring";
+  kind: "telegram" | "sms" | "fiscal" | "acquiring" | "voice" | "assistant";
   label: string;
   about: string;
   docsUrl: string;
@@ -27,6 +27,8 @@ const GROUPS: { kind: Integration["kind"]; title: string; hint: string }[] = [
   { kind: "sms", title: "SMS", hint: "Для клиентов без Telegram. Работает один шлюз; включение другого выключает первый." },
   { kind: "fiscal", title: "Онлайн-касса (54-ФЗ)", hint: "После подключения выберите кассу в разделе «Чеки и онлайн-оплата» ниже." },
   { kind: "acquiring", title: "Эквайринг: карта и СБП", hint: "Нужен для оплаты по ссылке и предоплаты. Провайдера выбирают в «Чеки и онлайн-оплата»." },
+  { kind: "assistant", title: "Ассистент", hint: "Умный помощник в строке ⌘K и голосом: отвечает по данным салона и сам предлагает действия." },
+  { kind: "voice", title: "Живой голос", hint: "Без него CRM говорит голосом браузера. SaluteSpeech работает с российского сервера." },
 ];
 
 function Status({ item }: { item: Integration }) {
