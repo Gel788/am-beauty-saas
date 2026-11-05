@@ -660,8 +660,8 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                 type="button"
                 className={`cmd-speak ${wake.on ? "on" : ""}`}
                 onClick={wake.toggle}
-                aria-label={wake.on ? "Не слушать слово «Ассистент»" : "Слушать слово «Ассистент»"}
-                title={wake.on ? "Слушаю «Ассистент…» в фоне: вкл" : "Вызывать голосом «Ассистент…»: выкл"}
+                aria-label={wake.on ? `Не слушать «${wake.name}»` : `Слушать «${wake.name}»`}
+                title={wake.on ? `Слушаю «${wake.name}…» в фоне: вкл` : `Вызывать голосом «${wake.name}…»: выкл`}
               >
                 <Ear size={17} />
               </button>
@@ -710,6 +710,26 @@ export function CommandBar({ branches, role }: { branches: Branch[]; role: strin
                     </button>
                   ))}
                 </div>
+                {wake.supported && (
+                  <div className="cmd-wake">
+                    <button type="button" className={`cmd-wake-switch ${wake.on ? "on" : ""}`} onClick={wake.toggle}>
+                      <Ear size={15} /> {wake.on ? "Слушаю в фоне" : "Вызывать голосом"}
+                    </button>
+                    <span>скажите «Привет,</span>
+                    <input
+                      className="cmd-wake-name"
+                      defaultValue={wake.name}
+                      key={wake.name}
+                      aria-label="Имя ассистента для вызова голосом"
+                      onBlur={(event) => wake.setName(event.target.value)}
+                      onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+                      }}
+                    />
+                    <span>, кто сегодня свободен?»</span>
+                  </div>
+                )}
               </div>
             )}
             {text.trim() && !items.length && <div className="cmd-empty"><p>Ничего не нашлось. Попробуйте имя клиента, мастера, услугу, день или раздел.</p></div>}
@@ -769,7 +789,7 @@ export function CommandButton() {
         type="button"
         className={`cmd-pill-mic ${wake.on ? "wake" : ""}`}
         aria-label="Сказать голосом"
-        title={wake.on ? "Скажите «Ассистент…» или нажмите" : "Сказать голосом"}
+        title={wake.on ? `Скажите «${wake.name}…» или нажмите` : "Сказать голосом"}
         onClick={() => window.dispatchEvent(new CustomEvent("open-command-bar", { detail: { voice: true } }))}
       >
         <Mic size={16} />
