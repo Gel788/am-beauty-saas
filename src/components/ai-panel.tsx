@@ -11,7 +11,7 @@ import { buildPulse, hhmm, type PulseAction, type PulseCard, type PulseDay, type
 type Me = { branches: { id: string; timezone: string }[] };
 type Item = { title: string; trackStock: boolean; active: boolean; minQty: number; qty: number };
 
-const ICONS: Record<string, typeof Sparkles> = { late: AlertCircle, next: UserRoundCheck, debts: Coins, wait: Hourglass, gaps: CalendarClock, confirm: CheckCheck, due: RefreshCw, stock: Package };
+const ICONS: Record<string, typeof Sparkles> = { late: AlertCircle, unmarked: AlertCircle, next: UserRoundCheck, debts: Coins, wait: Hourglass, gaps: CalendarClock, confirm: CheckCheck, due: RefreshCw, stock: Package };
 
 function rub(minor: number) {
   return `${new Intl.NumberFormat("ru-RU").format(Math.round(minor / 100))} ₽`;
@@ -129,7 +129,7 @@ export function AiPanel() {
             <span><b>{summary.visits}</b> визитов</span>
             <span><b>{summary.done}</b> готово</span>
             <span><b>{summary.left}</b> впереди</span>
-            <span><b>{Math.round(summary.freeMin / 60)}</b> ч свободно</span>
+            <span><b>{Math.round(summary.freeMin / 60)} ч</b> окон</span>
           </div>
         </div>
       )}

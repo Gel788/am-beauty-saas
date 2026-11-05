@@ -81,3 +81,12 @@ describe("PULSE-01 Пульт дня", () => {
     expect(cards.find((card) => card.key === "stock")?.title).toBe("Заканчивается 2 позиции");
   });
 });
+
+describe("PULSE-01 unmarked visits", () => {
+  it("folds older unmarked visits into one card", () => {
+    const today = day([appt({ id: "o1", startMin: 600 }), appt({ id: "o2", startMin: 660, staffId: "s1" }), appt({ id: "l1", startMin: 760, endMin: 820 })]);
+    const { cards } = buildPulse({ ...empty, today, tomorrow: null, nowMin: 780 });
+    expect(cards.map((card) => card.key).slice(0, 2)).toEqual(["late-l1", "unmarked"]);
+    expect(cards[1].title).toBe("Не отмечено 2 прошедших визита");
+  });
+});
