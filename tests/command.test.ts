@@ -56,3 +56,14 @@ describe("command bar", () => {
     expect(matchPages("отзывы")[0].href).toBe("/retention");
   });
 });
+
+describe("VOICE-01 spoken numbers", () => {
+  it("turns spoken times and counts into digits", async () => {
+    const { spokenToDigits } = await import("@/domain/command");
+    expect(spokenToDigits("запиши Анну к Алине завтра в пятнадцать тридцать на маникюр")).toBe("запиши Анну к Алине завтра в 15:30 на маникюр");
+    expect(spokenToDigits("в десять ноль ноль")).toBe("в 10:00");
+    expect(spokenToDigits("в три часа дня")).toBe("в 3 часа дня");
+    expect(spokenToDigits("через две недели")).toBe("через 2 недели");
+    expect(spokenToDigits("в девятнадцать сорок пять")).toBe("в 19:45");
+  });
+});
