@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command install or update of AM Beauty CRM on a fresh Ubuntu/Debian server.
 #   curl -fsSL https://raw.githubusercontent.com/Gel788/am-beauty-saas/staging/deploy/install.sh | sudo bash
-# Options (env): BRANCH=staging  DIR=/opt/am-beauty-saas  DOMAIN=<your domain>  ADMIN_EMAIL=<platform owner>  SEED=1|0  RESET_DB=1 (drop a leftover database; by default it is kept and its password realigned)
+# Options (env): BRANCH=staging  DIR=/opt/am-beauty-saas  DOMAIN=<your domain>  ADMIN_EMAIL=<platform owner>  SEED=1|0  DEMO_MONTH=1|0  RESET_DB=1 (drop a leftover database; by default it is kept and its password realigned)
 #   AUTO_UPDATE=1|0 (default 1): every 3 minutes the server checks the branch and redeploys itself when it changed.
 # Without DOMAIN the server gets a free name <ip>.sslip.io with a real HTTPS certificate.
 set -euo pipefail
@@ -96,6 +96,12 @@ SEED="${SEED:-$FRESH}"
 if [ "$SEED" = 1 ]; then
   say "Demo data"
   $C run --rm migrate node scripts/seed.mjs
+fi
+# DEMO-MONTH: the demo salon gets a schedule, a booked journal up to the end of the month and a full
+# warehouse. Runs on every update, adds only what is missing, does nothing without the demo salon.
+if [ "${DEMO_MONTH:-1}" = 1 ]; then
+  say "Demo month"
+  $C run --rm migrate node scripts/demo-month.mjs || echo "demo-month failed, the CRM keeps running"
 fi
 say "Start"
 $C up -d --remove-orphans
